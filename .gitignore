@@ -1,0 +1,17 @@
+# 用户数据：包含凭证、会话、日志，绝不能提交
+homes/
+logs/
+versions/
+launcher.json
+/installed.flag
+*.log
+
+# 构建产物
+installer/Output/
+installer/*.exe
+dist/
+*.zip
+
+# 系统
+Thumbs.db
+desktop.ini
