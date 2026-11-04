@@ -61,6 +61,14 @@ function Get-NodePath {
     return $cmd.Source
 }
 
+function Get-NpmPath {
+    foreach ($name in @('npm.cmd', 'npm.exe', 'npm')) {
+        $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($cmd) { return $cmd.Source }
+    }
+    throw 'PATH 中找不到 npm，请确认已安装 Node.js。'
+}
+
 function Test-PortOpen ([int]$port) {
     $client = [System.Net.Sockets.TcpClient]::new()
     try {
@@ -158,6 +166,24 @@ function Read-OneLog ($entry) {
 
 function Read-NewLog {
     foreach ($entry in @($script:Tail)) { Read-OneLog $entry }
+}
+
+function Write-Crash ([string]$where, $err) {
+    try {
+        $detail = if ($err -is [System.Management.Automation.ErrorRecord]) { $err.Exception } else { $err }
+        $text = (Get-Date -Format 'yyyy-MM-dd HH:mm:ss') + '  [' + $where + ']  ' +
+            $detail.GetType().Name + ': ' + $detail.Message + [Environment]::NewLine +
+            $detail.StackTrace + [Environment]::NewLine + [Environment]::NewLine
+        Add-Content -Path (Join-Path $script:LogsRoot 'crash.log') -Value $text -Encoding utf8
+    } catch { }
+}
+
+function Show-Error ([string]$where, $err) {
+    Write-Crash $where $err
+    $msg = if ($err -is [System.Management.Automation.ErrorRecord]) { $err.Exception.Message } else { $err.Message }
+    [System.Windows.MessageBox]::Show(
+        $msg + [Environment]::NewLine + [Environment]::NewLine + '详情已写入 logs\crash.log',
+        '出错了') | Out-Null
 }
 
 # ------------------------------------------------------------------ 实例
@@ -315,7 +341,10 @@ function Install-Version ([string]$version) {
     $outLog = Join-Path $script:LogsRoot ('install-' + $version + '.out.log')
     $errLog = Join-Path $script:LogsRoot ('install-' + $version + '.err.log')
 
-    $proc = Start-Process -FilePath 'npm.cmd' -ArgumentList @('i', '-g', '@deepseek-ai/dsh@' + $version, '--prefix', $target, '--no-audit', '--no-fund') -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
+    # 注意：不能写成 @('i','-g','@deepseek-ai/dsh@' + $version, ...) —— 数组字面量里的 + 会被拆成两个元素
+    $npm = Get-NpmPath
+    $spec = '@deepseek-ai/dsh@' + $version
+    $proc = Start-Process -FilePath $npm -ArgumentList @('i', '-g', $spec, '--prefix', $target, '--no-audit', '--no-fund') -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
 
     $script:Install = @{ Process = $proc; Version = $version; Log = $outLog }
     $script:Tail = @(
@@ -706,12 +735,16 @@ $window.FindName('btnCheckUpdate').Add_Click({
 })
 
 $script:BtnInstall.Add_Click({
-    $sel = $script:CmbAvailable.SelectedItem
-    if (-not $sel) {
-        [System.Windows.MessageBox]::Show('请选择要安装的版本。', '提示') | Out-Null; return
+    try {
+        $sel = $script:CmbAvailable.SelectedItem
+        if (-not $sel) {
+            [System.Windows.MessageBox]::Show('请选择要安装的版本。', '提示') | Out-Null; return
+        }
+        $ver = ($sel -split '\s+')[0]
+        Install-Version $ver
+    } catch {
+        Show-Error 'btnInstall' $_
     }
-    $ver = ($sel -split '\s+')[0]
-    Install-Version $ver
 })
 
 $window.Add_Closing({
@@ -744,4 +777,15 @@ if ($SmokeTest) {
     exit 0
 }
 
-$window.ShowDialog() | Out-Null
+# 兜底：UI 线程上任何未捕获的异常都记录并提示，不再让进程直接退出
+$window.Dispatcher.add_UnhandledException({
+    param($sender, $eventArgs)
+    Show-Error 'dispatcher' $eventArgs.Exception
+    $eventArgs.Handled = $true
+})
+
+try {
+    $window.ShowDialog() | Out-Null
+} catch {
+    Show-Error 'showdialog' $_
+}

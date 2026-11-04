@@ -1,7 +1,7 @@
 ; dsh 启动器 安装脚本（Inno Setup 6）
 ; 编译：ISCC.exe installer\dsh-launcher.iss
 
-#define AppVersion "1.0.0"
+#define AppVersion "1.0.1"
 #define AppNameCn "dsh 启动器"
 #define AppPublisher "ZhouJunquanaaa"
 #define AppUrl "https://github.com/ZhouJunquanaaa/dsh-launcher"

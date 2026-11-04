@@ -8,7 +8,7 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 
 **方式一：安装包（推荐）**
 
-下载 [Releases](https://github.com/ZhouJunquanaaa/dsh-launcher/releases) 里的 `dsh-launcher-setup-1.0.0.exe`，双击安装。装完桌面和开始菜单会有「dsh 启动器」，双击即用。
+下载 [Releases](https://github.com/ZhouJunquanaaa/dsh-launcher/releases) 里最新的 `dsh-launcher-setup-*.exe`，双击安装。装完桌面和开始菜单会有「dsh 启动器」，双击即用。
 
 - 按用户安装到 `%LOCALAPPDATA%\Programs\dsh-launcher`，不需要管理员权限
 - 用户数据（配置、会话、版本）放在 `%LOCALAPPDATA%\dsh-launcher`，卸载时保留
@@ -100,6 +100,8 @@ pnpm run build:artifacts
 | `git clone` 长时间无进度，`.git` 里 pack 一直是 0 字节 | 本机到 GitHub 的 pack 传输被卡 | 改用 codeload tarball |
 | `pnpm install` 卡在 `cdn.sheetjs.com` 超时 | SheetJS 的 CDN 在 pnpm 里不稳定 | 已把 tarball 放到 `vendor/xlsx-0.20.3.tgz`，并在 `pnpm-workspace.yaml` 里 override |
 | 打开网页提示无权限 | 漏了 URL 里的 token | 用【打开网页】按钮，不要手敲地址 |
+| 点「下载并安装」后报 404 / 安装失败 | npm 收到的包名被拆开（历史 bug，1.0.1 已修） | 升级到 1.0.1 或更新 |
+| 界面无响应或异常退出 | 未捕获异常 | 看 `%LOCALAPPDATA%\dsh-launcher\logs\crash.log` |
 | `pnpm run build` 报 `git rev-parse HEAD` 失败 | 用 tarball 解压的目录没有 `.git`，构建脚本要读提交号 | 构建前设 `$env:DSH_CLIENT_COMMIT_HASH='fcc0ad4'`（任意 7-40 位十六进制），或 `git init` 后提交一次 |
 
 ## 配置格式
