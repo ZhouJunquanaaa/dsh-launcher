@@ -12,6 +12,9 @@ installer/*.exe
 dist/
 *.zip
 
+# 临时截图
+_*.png
+
 # 系统
 Thumbs.db
 desktop.ini
