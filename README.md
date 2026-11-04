@@ -1,4 +1,4 @@
-# dsh 启动器
+# dsh-luncher
 
 Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有独立的 `DSH_HOME`，配置、会话、凭证互不污染。
 
@@ -8,15 +8,17 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 
 **方式一：安装包（推荐）**
 
-下载 [Releases](https://github.com/ZhouJunquanaaa/dsh-launcher/releases) 里最新的 `dsh-launcher-setup-*.exe`，双击安装。装完桌面和开始菜单会有「dsh 启动器」，双击即用。
+下载 [Releases](https://github.com/ZhouJunquanaaa/dsh-launcher/releases) 里最新的 `dsh-luncher-setup-*.exe`，双击安装。装完桌面和开始菜单会有「dsh-luncher」，双击即用。
 
-- 按用户安装到 `%LOCALAPPDATA%\Programs\dsh-launcher`，不需要管理员权限
-- 用户数据（配置、会话、版本）放在 `%LOCALAPPDATA%\dsh-launcher`，卸载时保留
-- 卸载：开始菜单「Uninstall dsh 启动器」，或设置 → 应用
+- 按用户安装到 `%LOCALAPPDATA%\Programs\dsh-luncher`，不需要管理员权限
+- 用户数据（配置、会话、版本）放在 `%LOCALAPPDATA%\dsh-luncher`，卸载时保留
+- 卸载：开始菜单「Uninstall dsh-luncher」，或设置 → 应用
+
+> **从 1.0.x 升级**：旧版名字是 `dsh-launcher`，AppId 不同，请先卸载旧版再装这个。首次启动会把 `%LOCALAPPDATA%\dsh-launcher` 的数据自动迁移到 `%LOCALAPPDATA%\dsh-luncher`。
 
 **方式二：免安装**
 
-把仓库下载下来，直接双击 `dsh-launcher.cmd`。此时数据就放在脚本旁边（便携模式）。
+把仓库下载下来，直接双击 `dsh-luncher.cmd`。此时数据就放在脚本旁边（便携模式）。
 
 ## 前置要求
 
@@ -40,8 +42,8 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 ## 目录结构
 
 ```
-dsh-launcher.cmd      双击入口（无控制台窗口）
-dsh-launcher.ps1      主程序（PowerShell 7 + WPF）
+dsh-luncher.cmd      双击入口（无控制台窗口）
+dsh-luncher.ps1      主程序（PowerShell 7 + WPF）
 ui.xaml               界面定义
 launcher.json         实例配置（自动生成）
 versions\             npm --prefix 安装的 dsh 版本
@@ -51,7 +53,7 @@ logs\                 每次启动的 stdout / stderr 日志
 
 ## 使用
 
-双击 `dsh-launcher.cmd`。
+双击 `dsh-luncher.cmd`。
 
 | 按钮 | 作用 |
 |---|---|
@@ -101,7 +103,7 @@ pnpm run build:artifacts
 | `pnpm install` 卡在 `cdn.sheetjs.com` 超时 | SheetJS 的 CDN 在 pnpm 里不稳定 | 已把 tarball 放到 `vendor/xlsx-0.20.3.tgz`，并在 `pnpm-workspace.yaml` 里 override |
 | 打开网页提示无权限 | 漏了 URL 里的 token | 用【打开网页】按钮，不要手敲地址 |
 | 点「下载并安装」后报 404 / 安装失败 | npm 收到的包名被拆开（历史 bug，1.0.1 已修） | 升级到 1.0.1 或更新 |
-| 界面无响应或异常退出 | 未捕获异常 | 看 `%LOCALAPPDATA%\dsh-launcher\logs\crash.log` |
+| 界面无响应或异常退出 | 未捕获异常 | 看 `%LOCALAPPDATA%\dsh-luncher\logs\crash.log` |
 | `pnpm run build` 报 `git rev-parse HEAD` 失败 | 用 tarball 解压的目录没有 `.git`，构建脚本要读提交号 | 构建前设 `$env:DSH_CLIENT_COMMIT_HASH='fcc0ad4'`（任意 7-40 位十六进制），或 `git init` 后提交一次 |
 
 ## 配置格式
@@ -116,7 +118,7 @@ pnpm run build:artifacts
       "name": "0.2.2-alpha.3",
       "dshVersion": "0.2.2-alpha.3",
       "bin": "D:\\APPS\\nvm\\installs\\v26.13.0\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js",
-      "dshHome": "D:\\Workspace\\dsh-launcher\\homes\\0.2.2-alpha.3",
+      "dshHome": "D:\\Workspace\\dsh-luncher\\homes\\0.2.2-alpha.3",
       "port": 8890,
       "cwd": "D:\\Workspace"
     },
@@ -124,7 +126,7 @@ pnpm run build:artifacts
       "name": "src-deepseek-harness",
       "dshVersion": "0.2.2-rc.1",
       "source": "D:\\Workspace\\deepseek-harness",
-      "dshHome": "D:\\Workspace\\dsh-launcher\\homes\\src-deepseek-harness",
+      "dshHome": "D:\\Workspace\\dsh-luncher\\homes\\src-deepseek-harness",
       "port": 8891
     }
   ]

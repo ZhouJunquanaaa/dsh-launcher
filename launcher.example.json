@@ -4,8 +4,8 @@
     {
       "name": "example-npm",
       "dshVersion": "0.2.2-alpha.3",
-      "bin": "C:\\Users\\you\\AppData\\Local\\dsh-launcher\\versions\\0.2.2-alpha.3\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js",
-      "dshHome": "C:\\Users\\you\\AppData\\Local\\dsh-launcher\\homes\\example-npm",
+      "bin": "C:\\Users\\you\\AppData\\Local\\dsh-luncher\\versions\\0.2.2-alpha.3\\node_modules\\@deepseek-ai\\dsh\\lib\\bin.js",
+      "dshHome": "C:\\Users\\you\\AppData\\Local\\dsh-luncher\\homes\\example-npm",
       "port": 8889,
       "cwd": "D:\\Workspace",
       "notes": ""
@@ -14,7 +14,7 @@
       "name": "example-source",
       "dshVersion": "0.2.2-rc.1",
       "source": "D:\\Workspace\\deepseek-harness",
-      "dshHome": "C:\\Users\\you\\AppData\\Local\\dsh-launcher\\homes\\example-source",
+      "dshHome": "C:\\Users\\you\\AppData\\Local\\dsh-luncher\\homes\\example-source",
       "port": 8890,
       "cwd": "D:\\Workspace\\deepseek-harness",
       "notes": "source"

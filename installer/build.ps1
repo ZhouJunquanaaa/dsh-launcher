@@ -24,7 +24,7 @@ if (-not $iscc) {
 }
 
 Write-Host "使用编译器：$iscc" -ForegroundColor Cyan
-& $iscc (Join-Path $PSScriptRoot 'dsh-launcher.iss')
+& $iscc (Join-Path $PSScriptRoot 'dsh-luncher.iss')
 if ($LASTEXITCODE -ne 0) { throw "编译失败，退出码 $LASTEXITCODE" }
 
 $setup = Get-ChildItem (Join-Path $PSScriptRoot 'Output') -Filter '*.exe' |
@@ -32,14 +32,14 @@ $setup = Get-ChildItem (Join-Path $PSScriptRoot 'Output') -Filter '*.exe' |
 Write-Host ("安装包：{0} ({1:N2} MB)" -f $setup.FullName, ($setup.Length / 1MB)) -ForegroundColor Green
 
 if ($Portable) {
-    $stage = Join-Path $env:TEMP ('dsh-launcher-portable-' + [guid]::NewGuid().ToString('N'))
+    $stage = Join-Path $env:TEMP ('dsh-luncher-portable-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-    foreach ($name in @('dsh-launcher.ps1', 'dsh-launcher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
+    foreach ($name in @('dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
         Copy-Item (Join-Path $root $name) $stage
     }
 
-    $zip = Join-Path (Join-Path $PSScriptRoot 'Output') 'dsh-launcher-portable.zip'
+    $zip = Join-Path (Join-Path $PSScriptRoot 'Output') 'dsh-luncher-portable.zip'
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
     Remove-Item $stage -Recurse -Force

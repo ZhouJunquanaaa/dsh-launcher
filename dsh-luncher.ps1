@@ -1,6 +1,6 @@
 #Requires -Version 7.0
 <#
-    dsh 启动器（GUI）
+    dsh-luncher（GUI）
     - 为每个实例维护独立的 DSH_HOME，互不污染配置/会话/凭证
     - 通过 npm --prefix 把指定版本的 dsh 装进 versions\ 目录，不影响全局 npm / nvm
     - 启动 dsh web 后轮询端口，就绪即打开浏览器
@@ -13,7 +13,13 @@ Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 $script:Root         = $PSScriptRoot
 # 安装版（存在 installed.flag）把用户数据放到 %LOCALAPPDATA%；便携版放脚本旁边
-$script:DataRoot     = if (Test-Path (Join-Path $script:Root 'installed.flag')) { Join-Path $env:LOCALAPPDATA 'dsh-launcher' } else { $script:Root }
+$script:DataRoot     = if (Test-Path (Join-Path $script:Root 'installed.flag')) { Join-Path $env:LOCALAPPDATA 'dsh-luncher' } else { $script:Root }
+
+# 从旧名字 dsh-luncher 迁移一次数据目录
+$legacyData = Join-Path $env:LOCALAPPDATA 'dsh-launcher'
+if ((Test-Path (Join-Path $script:Root 'installed.flag')) -and -not (Test-Path $script:DataRoot) -and (Test-Path $legacyData)) {
+    try { Move-Item $legacyData $script:DataRoot -Force } catch { }
+}
 $script:ConfigPath   = Join-Path $script:DataRoot 'launcher.json'
 $script:VersionsRoot = Join-Path $script:DataRoot 'versions'
 $script:HomesRoot    = Join-Path $script:DataRoot 'homes'
@@ -301,6 +307,10 @@ function Refresh-InstanceList {
         foreach ($row in $rows) {
             if ($row.Name -eq $selected) { $script:LstInstances.SelectedItem = $row; break }
         }
+    }
+    # 重建列表会清空选中项，这里补回第一行，避免“启动”按钮点了没反应
+    if (-not $script:LstInstances.SelectedItem -and $rows.Count -gt 0) {
+        $script:LstInstances.SelectedIndex = 0
     }
     $script:LastHash = ($rows | ForEach-Object { $_.Name + ':' + $_.Status }) -join '|'
 }

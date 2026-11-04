@@ -1,26 +1,26 @@
-; dsh 启动器 安装脚本（Inno Setup 6）
-; 编译：ISCC.exe installer\dsh-launcher.iss
+; dsh-luncher 安装脚本（Inno Setup 6）
+; 编译：ISCC.exe installer\dsh-luncher.iss
 
-#define AppVersion "1.0.1"
-#define AppNameCn "dsh 启动器"
+#define AppVersion "1.1.0"
+#define AppName "dsh-luncher"
 #define AppPublisher "ZhouJunquanaaa"
 #define AppUrl "https://github.com/ZhouJunquanaaa/dsh-launcher"
 
 [Setup]
-AppId={{8F3C1A52-9E4B-4D7A-B2C1-7A5E9D3F6B84}
-AppName={#AppNameCn}
+AppId={{B7E4D2A1-3C5F-4A8B-9D2E-6F1C8A4B7D93}
+AppName={#AppName}
 AppVersion={#AppVersion}
-AppVerName={#AppNameCn} {#AppVersion}
+AppVerName={#AppName} {#AppVersion}
 AppPublisher={#AppPublisher}
 AppPublisherURL={#AppUrl}
 AppSupportURL={#AppUrl}
 AppUpdatesURL={#AppUrl}
 VersionInfoVersion={#AppVersion}
-DefaultDirName={autopf}\dsh-launcher
-DefaultGroupName={#AppNameCn}
+DefaultDirName={autopf}\dsh-luncher
+DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 OutputDir=Output
-OutputBaseFilename=dsh-launcher-setup-{#AppVersion}
+OutputBaseFilename=dsh-luncher-setup-{#AppVersion}
 SetupIconFile=..\launcher.ico
 UninstallDisplayIcon={app}\launcher.ico
 Compression=lzma2/max
@@ -38,8 +38,8 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a &desktop shortcut"; GroupDescription: "Additional shortcuts:"
 
 [Files]
-Source: "..\dsh-launcher.ps1"; DestDir: "{app}"; Flags: ignoreversion
-Source: "..\dsh-launcher.cmd"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dsh-luncher.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dsh-luncher.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\ui.xaml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\launcher.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
@@ -47,12 +47,12 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "installed.flag"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppNameCn}"; Filename: "{app}\dsh-launcher.cmd"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"
-Name: "{group}\Uninstall {#AppNameCn}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppNameCn}"; Filename: "{app}\dsh-launcher.cmd"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{group}\{#AppName}"; Filename: "{app}\dsh-luncher.cmd"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"
+Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\dsh-luncher.cmd"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\dsh-launcher.cmd"; Description: "Launch {#AppNameCn}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\dsh-luncher.cmd"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}"
@@ -72,7 +72,7 @@ begin
   if not PwshPresent() then
   begin
     if MsgBox('PowerShell 7 (pwsh) was not found.' + #13#10 + #13#10 +
-              'The launcher needs PowerShell 7 to run its GUI. Install it first:' + #13#10 +
+              'dsh-luncher needs PowerShell 7 to run its GUI. Install it first:' + #13#10 +
               '    winget install Microsoft.PowerShell' + #13#10 + #13#10 +
               'Continue the installation anyway?',
               mbConfirmation, MB_YESNO) = IDNO then
