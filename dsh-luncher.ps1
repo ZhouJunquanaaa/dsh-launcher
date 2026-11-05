@@ -39,13 +39,14 @@ foreach ($d in @($script:VersionsRoot, $script:HomesRoot, $script:LogsRoot)) {
 # ------------------------------------------------------------------ 配置
 
 function New-DefaultConfig {
-    [ordered]@{ version = 1; instances = @() }
+    [ordered]@{ version = 1; theme = 'light'; instances = @() }
 }
 
 function Read-Config {
     if (-not (Test-Path $script:ConfigPath)) { return (New-DefaultConfig) }
     $raw = Get-Content $script:ConfigPath -Raw -Encoding utf8 | ConvertFrom-Json
     $cfg = New-DefaultConfig
+    if ($raw.PSObject.Properties['theme'] -and $raw.theme -in @('light', 'dark')) { $cfg.theme = $raw.theme }
     if ($raw.PSObject.Properties['instances'] -and $raw.instances) { $cfg.instances = @($raw.instances) }
     return $cfg
 }
@@ -65,6 +66,21 @@ function Get-NodePath {
     $cmd = Get-Command node -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if (-not $cmd) { throw 'PATH 中找不到 node.exe' }
     return $cmd.Source
+}
+
+function New-ThemeDictionary ([string]$name) {
+    $file = Join-Path (Join-Path $script:Root 'themes') ($name + '.xaml')
+    if (-not (Test-Path $file)) { $file = Join-Path (Join-Path $script:Root 'themes') 'light.xaml' }
+    return [System.Windows.Markup.XamlReader]::Parse((Get-Content $file -Raw -Encoding utf8))
+}
+
+function Set-Theme ([string]$name) {
+    $dictionary = New-ThemeDictionary $name
+    $script:Window.Resources.MergedDictionaries.Clear()
+    $script:Window.Resources.MergedDictionaries.Add($dictionary)
+    $script:Theme = $name
+    $button = $script:Window.FindName('btnTheme')
+    if ($button) { $button.Content = if ($name -eq 'light') { '深色' } else { '浅色' } }
 }
 
 function Get-NpmPath {
@@ -411,8 +427,9 @@ function Show-RemoveVersionDialog ([string]$version, [long]$versionSize, $npmIns
     $dlg.Width = 580
     $dlg.SizeToContent = 'Height'
     $dlg.WindowStartupLocation = 'CenterOwner'
-    $dlg.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#1B1B1F')
-    $dlg.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E6E6E6')
+    $dlg.Resources.MergedDictionaries.Add((New-ThemeDictionary $script:Theme))
+    $dlg.SetResourceReference([System.Windows.Window]::BackgroundProperty, 'WindowBrush')
+    $dlg.SetResourceReference([System.Windows.Window]::ForegroundProperty, 'TextBrush')
     $dlg.FontFamily = [System.Windows.Media.FontFamily]::new('Microsoft YaHei UI')
     $dlg.ResizeMode = 'NoResize'
 
@@ -429,7 +446,7 @@ function Show-RemoveVersionDialog ([string]$version, [long]$versionSize, $npmIns
     $dirText = [System.Windows.Controls.TextBlock]::new()
     $dirText.Text = '版本目录：versions\' + $version + '（' + (Format-Size $versionSize) + '）'
     $dirText.TextWrapping = 'Wrap'
-    $dirText.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#9A9AA8')
+    $dirText.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'MutedBrush')
     $dirText.Margin = [System.Windows.Thickness]::new(0, 0, 0, 14)
     $panel.Children.Add($dirText) | Out-Null
 
@@ -468,7 +485,7 @@ function Show-RemoveVersionDialog ([string]$version, [long]$versionSize, $npmIns
     $warn.Text = '删除后无法恢复。会话记录、凭证和已下载的依赖都会一并消失。'
     $warn.TextWrapping = 'Wrap'
     $warn.FontSize = 11
-    $warn.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#D98A8A')
+    $warn.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'DangerBrush')
     $warn.Margin = [System.Windows.Thickness]::new(0, 8, 0, 14)
     $panel.Children.Add($warn) | Out-Null
 
@@ -478,12 +495,14 @@ function Show-RemoveVersionDialog ([string]$version, [long]$versionSize, $npmIns
 
     $btnOk = [System.Windows.Controls.Button]::new()
     $btnOk.Content = '删除'
+    $btnOk.Style = $script:Window.FindResource('PrimaryButton')
     $btnOk.Width = 90
     $btnOk.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
     $btnCancel = [System.Windows.Controls.Button]::new()
     $btnCancel.Content = '取消'
     $btnCancel.Width = 90
     $btnCancel.IsCancel = $true
+    $btnCancel.Style = $script:Window.FindResource('SecondaryButton')
     $buttons.Children.Add($btnOk) | Out-Null
     $buttons.Children.Add($btnCancel) | Out-Null
     $panel.Children.Add($buttons) | Out-Null
@@ -570,8 +589,9 @@ function Show-AddDialog {
     $dlg.Width = 480
     $dlg.Height = 330
     $dlg.WindowStartupLocation = 'CenterOwner'
-    $dlg.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#1B1B1F')
-    $dlg.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E6E6E6')
+    $dlg.Resources.MergedDictionaries.Add((New-ThemeDictionary $script:Theme))
+    $dlg.SetResourceReference([System.Windows.Window]::BackgroundProperty, 'WindowBrush')
+    $dlg.SetResourceReference([System.Windows.Window]::ForegroundProperty, 'TextBrush')
     $dlg.FontFamily = [System.Windows.Media.FontFamily]::new('Microsoft YaHei UI')
 
     $grid = [System.Windows.Controls.Grid]::new()
@@ -634,6 +654,7 @@ function Show-AddDialog {
 
     $btnOk = [System.Windows.Controls.Button]::new()
     $btnOk.Content = '确定'
+    $btnOk.Style = $script:Window.FindResource('PrimaryButton')
     $btnOk.Width = 90
     $btnOk.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
     $btnOk.IsDefault = $true
@@ -641,6 +662,7 @@ function Show-AddDialog {
     $btnCancel.Content = '取消'
     $btnCancel.Width = 90
     $btnCancel.IsCancel = $true
+    $btnCancel.Style = $script:Window.FindResource('SecondaryButton')
 
     $panel.Children.Add($btnOk) | Out-Null
     $panel.Children.Add($btnCancel) | Out-Null
@@ -759,6 +781,11 @@ if ($Import) {
 
 $window = [System.Windows.Markup.XamlReader]::Parse((Get-Content (Join-Path $script:Root 'ui.xaml') -Raw -Encoding utf8))
 
+$iconFile = Join-Path $script:Root 'launcher.ico'
+if (Test-Path $iconFile) {
+    try { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($iconFile)) } catch { }
+}
+
 $script:LstInstances  = $window.FindName('lstInstances')
 $script:LstVersions   = $window.FindName('lstVersions')
 $script:CmbAvailable  = $window.FindName('cmbAvailable')
@@ -769,6 +796,9 @@ $script:LblLatest     = $window.FindName('lblLatest')
 $script:BtnInstall    = $window.FindName('btnInstall')
 
 $script:Cfg = Read-Config
+$script:Window = $window
+$script:Theme = $(if ($script:Cfg.theme -in @('light', 'dark')) { $script:Cfg.theme } else { 'light' })
+Set-Theme $script:Theme
 
 function Update-Tick {
     Read-NewLog
@@ -887,6 +917,17 @@ $window.FindName('btnRemove').Add_Click({
 })
 
 $window.FindName('btnImport').Add_Click({ Import-Local })
+
+$window.FindName('btnTheme').Add_Click({
+    try {
+        $next = if ($script:Theme -eq 'light') { 'dark' } else { 'light' }
+        Set-Theme $next
+        $script:Cfg.theme = $next
+        Save-Config
+    } catch {
+        Show-Error 'btnTheme' $_
+    }
+})
 
 $window.FindName('btnAddSource').Add_Click({
     Add-Type -AssemblyName System.Windows.Forms

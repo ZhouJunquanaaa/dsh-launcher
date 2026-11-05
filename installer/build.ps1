@@ -25,7 +25,7 @@ if (-not $csc) {
 
 $exe = Join-Path $root 'dsh-luncher.exe'
 Remove-Item $exe -Force -ErrorAction SilentlyContinue
-& $csc /nologo /codepage:65001 /target:winexe /optimize+ "/out:$exe" (Join-Path $PSScriptRoot 'launcher.cs')
+& $csc /nologo /codepage:65001 /target:winexe /optimize+ "/win32icon:$root\launcher.ico" "/out:$exe" (Join-Path $PSScriptRoot 'launcher.cs')
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { throw "编译 dsh-luncher.exe 失败：$LASTEXITCODE" }
 Write-Host ("入口程序：{0} ({1:N0} 字节)" -f $exe, (Get-Item $exe).Length) -ForegroundColor Green
 
@@ -55,6 +55,8 @@ if ($Portable) {
     foreach ($name in @('dsh-luncher.exe', 'dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
         Copy-Item (Join-Path $root $name) $stage
     }
+
+    Copy-Item (Join-Path $root 'themes') $stage -Recurse
 
     $zip = Join-Path (Join-Path $PSScriptRoot 'Output') 'dsh-luncher-portable.zip'
     Remove-Item $zip -Force -ErrorAction SilentlyContinue

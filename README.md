@@ -4,6 +4,14 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 
 ![界面截图](screenshot.png)
 
+## 界面
+
+浅色主题是默认值，右上角「深色 / 浅色」一键切换，选择记在 `launcher.json` 的 `theme` 字段里。
+
+主题色板在 `themes/light.xaml` 和 `themes/dark.xaml`，改配色只需要动这两个文件。
+
+> 图标是一只原创的白色小鲸鱼（蓝色渐变底），**不是** DeepSeek 官方吉祥物。DeepSeek 的[品牌指南](https://github.com/deepseek-ai/deepseek-harness/blob/master/BRAND_GUIDELINES.md)要求第三方项目避免使用官方素材，以免被误认为官方背书。
+
 ## 安装
 
 **方式一：安装包（推荐）**

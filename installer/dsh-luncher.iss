@@ -1,7 +1,7 @@
 ; dsh-luncher 安装脚本（Inno Setup 6）
 ; 编译：ISCC.exe installer\dsh-luncher.iss
 
-#define AppVersion "1.2.0"
+#define AppVersion "1.3.0"
 #define AppName "dsh-luncher"
 #define AppPublisher "ZhouJunquanaaa"
 #define AppUrl "https://github.com/ZhouJunquanaaa/dsh-launcher"
@@ -42,6 +42,7 @@ Source: "..\dsh-luncher.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dsh-luncher.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dsh-luncher.cmd"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\ui.xaml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\themes\*.xaml"; DestDir: "{app}\themes"; Flags: ignoreversion
 Source: "..\launcher.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
