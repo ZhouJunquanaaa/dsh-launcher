@@ -1,7 +1,7 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    编译安装包（Inno Setup 6），可选再打一个免安装 zip。
+    编译无控制台入口 dsh-luncher.exe 和安装包（Inno Setup 6），可选再打一个免安装 zip。
 
 .EXAMPLE
     .\build.ps1
@@ -13,6 +13,23 @@ param([switch]$Portable)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
+# 1. 编译无控制台入口（双击不闪 PowerShell 窗口）
+$csc = @(
+    'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe',
+    'C:\Windows\Microsoft.NET\Framework\v4.0.30319\csc.exe'
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not $csc) {
+    throw '找不到 csc.exe（.NET Framework 4 自带），无法编译 dsh-luncher.exe'
+}
+
+$exe = Join-Path $root 'dsh-luncher.exe'
+Remove-Item $exe -Force -ErrorAction SilentlyContinue
+& $csc /nologo /codepage:65001 /target:winexe /optimize+ "/out:$exe" (Join-Path $PSScriptRoot 'launcher.cs')
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path $exe)) { throw "编译 dsh-luncher.exe 失败：$LASTEXITCODE" }
+Write-Host ("入口程序：{0} ({1:N0} 字节)" -f $exe, (Get-Item $exe).Length) -ForegroundColor Green
+
+# 2. 编译安装包
 $iscc = @(
     (Join-Path $env:LOCALAPPDATA 'Programs\Inno Setup 6\ISCC.exe'),
     'C:\Program Files (x86)\Inno Setup 6\ISCC.exe',
@@ -35,7 +52,7 @@ if ($Portable) {
     $stage = Join-Path $env:TEMP ('dsh-luncher-portable-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-    foreach ($name in @('dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
+    foreach ($name in @('dsh-luncher.exe', 'dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
         Copy-Item (Join-Path $root $name) $stage
     }
 

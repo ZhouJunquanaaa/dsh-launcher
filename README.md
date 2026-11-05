@@ -18,7 +18,11 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 
 **方式二：免安装**
 
-把仓库下载下来，直接双击 `dsh-luncher.cmd`。此时数据就放在脚本旁边（便携模式）。
+把仓库下载下来，直接双击 `dsh-luncher.exe`。此时数据就放在程序旁边（便携模式）。
+
+> **为什么没有黑窗口**：快捷方式指向的是 `dsh-luncher.exe`——一个 5 KB 的 WinExe，用
+> `CreateNoWindow` 拉起 `pwsh -File dsh-luncher.ps1`，所以不会像 `.cmd` 那样先弹一个控制台。
+> 源码在 `installer/launcher.cs`，`build.ps1` 会用系统自带的 csc.exe 现场编译。
 
 ## 前置要求
 
@@ -42,7 +46,8 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 ## 目录结构
 
 ```
-dsh-luncher.cmd      双击入口（无控制台窗口）
+dsh-luncher.exe      双击入口（WinExe，不闪控制台）
+dsh-luncher.cmd      命令行/便携入口（会开控制台）
 dsh-luncher.ps1      主程序（PowerShell 7 + WPF）
 ui.xaml               界面定义
 launcher.json         实例配置（自动生成）
