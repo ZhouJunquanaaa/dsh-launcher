@@ -70,6 +70,7 @@ logs\                 每次启动的 stdout / stderr 日志
 | 删除 | 只删配置，保留 home 目录 |
 | 导入本机 | 扫描 nvm 安装的 dsh，生成实例 |
 | 检查更新 | 查 registry 的 dist-tags（latest / next / alpha），右侧可一键装到 `versions\` |
+| 删除版本 | 删除已安装的 dsh 版本；可勾选连带删除使用它的实例、配置目录（DSH_HOME）和源码 checkout |
 
 > dsh web 启动时会打印 `http://127.0.0.1:<port>/?token=...`，启动器会从日志里抓这个 token，直接用裸地址打开会过不了浏览器信任校验。
 

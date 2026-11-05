@@ -368,6 +368,200 @@ function Install-Version ([string]$version) {
     $script:BtnInstall.IsEnabled = $false
 }
 
+# ------------------------------------------------------------------ 删除版本
+
+function Get-DirSize ([string]$path) {
+    if (-not $path -or -not (Test-Path $path)) { return [long]0 }
+    $sum = [long]0
+    try {
+        foreach ($file in [System.IO.Directory]::EnumerateFiles($path, '*', [System.IO.SearchOption]::AllDirectories)) {
+            try { $sum += ([System.IO.FileInfo]::new($file)).Length } catch { }
+        }
+    } catch { }
+    return $sum
+}
+
+function Format-Size ([long]$bytes) {
+    if ($bytes -ge 1GB) { return ('{0:N2} GB' -f ($bytes / 1GB)) }
+    if ($bytes -ge 1MB) { return ('{0:N1} MB' -f ($bytes / 1MB)) }
+    if ($bytes -ge 1KB) { return ('{0:N0} KB' -f ($bytes / 1KB)) }
+    return ('{0} B' -f $bytes)
+}
+
+function Remove-Directory ([string]$path) {
+    if (-not $path -or -not (Test-Path $path)) { return $true }
+    try { [System.IO.Directory]::Delete($path, $true); return $true }
+    catch {
+        try { Remove-Item $path -Recurse -Force -ErrorAction Stop; return $true }
+        catch { return $false }
+    }
+}
+
+function Get-VersionUsage ([string]$version) {
+    $all = @(Get-Instances | Where-Object { $_.dshVersion -eq $version })
+    return [pscustomobject]@{
+        Npm    = @($all | Where-Object { -not $_.source })
+        Source = @($all | Where-Object { $_.source })
+    }
+}
+
+function Show-RemoveVersionDialog ([string]$version, [long]$versionSize, $npmInstances, $sourceInstances, [long]$homeSize, [long]$sourceSize) {
+    $dlg = [System.Windows.Window]::new()
+    $dlg.Title = '删除版本 ' + $version
+    $dlg.Width = 580
+    $dlg.SizeToContent = 'Height'
+    $dlg.WindowStartupLocation = 'CenterOwner'
+    $dlg.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#1B1B1F')
+    $dlg.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E6E6E6')
+    $dlg.FontFamily = [System.Windows.Media.FontFamily]::new('Microsoft YaHei UI')
+    $dlg.ResizeMode = 'NoResize'
+
+    $panel = [System.Windows.Controls.StackPanel]::new()
+    $panel.Margin = [System.Windows.Thickness]::new(18)
+
+    $title = [System.Windows.Controls.TextBlock]::new()
+    $title.Text = '删除版本 ' + $version
+    $title.FontSize = 16
+    $title.FontWeight = 'SemiBold'
+    $title.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+    $panel.Children.Add($title) | Out-Null
+
+    $dirText = [System.Windows.Controls.TextBlock]::new()
+    $dirText.Text = '版本目录：versions\' + $version + '（' + (Format-Size $versionSize) + '）'
+    $dirText.TextWrapping = 'Wrap'
+    $dirText.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#9A9AA8')
+    $dirText.Margin = [System.Windows.Thickness]::new(0, 0, 0, 14)
+    $panel.Children.Add($dirText) | Out-Null
+
+    # 用 TextBlock 承载文字：CheckBox 的字符串 Content 会把下划线当成访问键
+    $chkInstances = [System.Windows.Controls.CheckBox]::new()
+    $chkInstances.IsEnabled = ($npmInstances.Count -gt 0)
+    $chkInstances.IsChecked = ($npmInstances.Count -gt 0)
+    $chkInstances.Margin = [System.Windows.Thickness]::new(0, 0, 0, 8)
+    $instText = [System.Windows.Controls.TextBlock]::new()
+    $instText.TextWrapping = 'Wrap'
+    if ($npmInstances.Count -gt 0) {
+        $names = ($npmInstances | ForEach-Object { $_.name }) -join '、'
+        $instText.Text = '同时删除 ' + $npmInstances.Count + ' 个 npm 实例（' + $names + '）及其配置目录（' + (Format-Size $homeSize) + '）'
+    } else {
+        $instText.Text = '没有 npm 实例使用该版本'
+    }
+    $chkInstances.Content = $instText
+    $panel.Children.Add($chkInstances) | Out-Null
+
+    $chkSources = [System.Windows.Controls.CheckBox]::new()
+    $chkSources.IsEnabled = ($sourceInstances.Count -gt 0)
+    $chkSources.IsChecked = $false
+    $chkSources.Margin = [System.Windows.Thickness]::new(0, 0, 0, 8)
+    $srcText = [System.Windows.Controls.TextBlock]::new()
+    $srcText.TextWrapping = 'Wrap'
+    if ($sourceInstances.Count -gt 0) {
+        $paths = ($sourceInstances | ForEach-Object { $_.source }) -join [Environment]::NewLine
+        $srcText.Text = '同时删除 ' + $sourceInstances.Count + ' 个源码实例的源码目录和配置目录（' + (Format-Size $sourceSize) + '）：' + [Environment]::NewLine + $paths
+    } else {
+        $srcText.Text = '没有关联的源码目录'
+    }
+    $chkSources.Content = $srcText
+    $panel.Children.Add($chkSources) | Out-Null
+
+    $warn = [System.Windows.Controls.TextBlock]::new()
+    $warn.Text = '删除后无法恢复。会话记录、凭证和已下载的依赖都会一并消失。'
+    $warn.TextWrapping = 'Wrap'
+    $warn.FontSize = 11
+    $warn.Foreground = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#D98A8A')
+    $warn.Margin = [System.Windows.Thickness]::new(0, 8, 0, 14)
+    $panel.Children.Add($warn) | Out-Null
+
+    $buttons = [System.Windows.Controls.StackPanel]::new()
+    $buttons.Orientation = 'Horizontal'
+    $buttons.HorizontalAlignment = 'Right'
+
+    $btnOk = [System.Windows.Controls.Button]::new()
+    $btnOk.Content = '删除'
+    $btnOk.Width = 90
+    $btnOk.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $btnCancel = [System.Windows.Controls.Button]::new()
+    $btnCancel.Content = '取消'
+    $btnCancel.Width = 90
+    $btnCancel.IsCancel = $true
+    $buttons.Children.Add($btnOk) | Out-Null
+    $buttons.Children.Add($btnCancel) | Out-Null
+    $panel.Children.Add($buttons) | Out-Null
+
+    $dlg.Content = $panel
+    $script:RemoveChoice = $null
+
+    $btnOk.Add_Click({
+        $script:RemoveChoice = [pscustomobject]@{
+            DeleteInstances = [bool]$script:ChkInstances.IsChecked
+            DeleteSources   = [bool]$script:ChkSources.IsChecked
+        }
+        $script:RemoveWindow.Close()
+    })
+
+    $script:RemoveWindow = $dlg
+    $script:ChkInstances = $chkInstances
+    $script:ChkSources = $chkSources
+
+    $dlg.ShowDialog() | Out-Null
+    return $script:RemoveChoice
+}
+
+function Remove-Version ([string]$version, [bool]$deleteInstances, [bool]$deleteSources) {
+    $usage = Get-VersionUsage $version
+    $removed = @()
+
+    foreach ($inst in @($usage.Npm) + @($usage.Source)) {
+        if ($script:Running[$inst.name]) { Stop-Instance $inst.name }
+    }
+
+    $versionDir = Join-Path $script:VersionsRoot $version
+    if (Remove-Directory $versionDir) { $removed += ('versions\' + $version) }
+
+    if ($deleteInstances) {
+        foreach ($inst in $usage.Npm) {
+            if (Remove-Directory $inst.dshHome) { $removed += ('home ' + $inst.name) }
+        }
+    }
+
+    if ($deleteSources) {
+        foreach ($inst in $usage.Source) {
+            if (Remove-Directory $inst.source) { $removed += ('source ' + $inst.source) }
+            if (Remove-Directory $inst.dshHome) { $removed += ('home ' + $inst.name) }
+        }
+    }
+
+    $script:Cfg.instances = @(Get-Instances | Where-Object {
+        if ($_.dshVersion -ne $version) { return $true }
+        if ($_.source) { return (-not $deleteSources) }
+        return (-not $deleteInstances)
+    })
+    Save-Config
+
+    Refresh-InstanceList
+    Refresh-VersionList
+
+    Append-Log ([Environment]::NewLine + '已删除版本 ' + $version + [Environment]::NewLine)
+    foreach ($item in $removed) { Append-Log ('  - ' + $item + [Environment]::NewLine) }
+}
+
+function Invoke-RemoveVersion ([string]$version) {
+    $usage = Get-VersionUsage $version
+    $versionDir = Join-Path $script:VersionsRoot $version
+    $versionSize = Get-DirSize $versionDir
+
+    $homeSize = [long]0
+    foreach ($inst in @($usage.Npm) + @($usage.Source)) { $homeSize += (Get-DirSize $inst.dshHome) }
+
+    $sourceSize = [long]0
+    foreach ($inst in $usage.Source) { $sourceSize += (Get-DirSize $inst.source) }
+
+    $choice = Show-RemoveVersionDialog $version $versionSize $usage.Npm $usage.Source $homeSize $sourceSize
+    if (-not $choice) { return }
+
+    Remove-Version $version $choice.DeleteInstances $choice.DeleteSources
+}
+
 # ------------------------------------------------------------------ 对话框
 
 function Show-AddDialog {
@@ -754,6 +948,19 @@ $script:BtnInstall.Add_Click({
         Install-Version $ver
     } catch {
         Show-Error 'btnInstall' $_
+    }
+})
+
+$window.FindName('btnRemoveVersion').Add_Click({
+    try {
+        $row = $script:LstVersions.SelectedItem
+        if (-not $row) {
+            [System.Windows.MessageBox]::Show('请先在「已安装版本」里选中一个版本。', '提示') | Out-Null
+            return
+        }
+        Invoke-RemoveVersion $row.Version
+    } catch {
+        Show-Error 'btnRemoveVersion' $_
     }
 })
 
