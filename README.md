@@ -18,9 +18,22 @@ Windows 图形界面启动器，用来管理多个 dsh 实例：每个实例有�
 
 下载 [Releases](https://github.com/ZhouJunquanaaa/dsh-launcher/releases) 里最新的 `dsh-luncher-setup-*.exe`，双击安装。装完桌面和开始菜单会有「dsh-luncher」，双击即用。
 
-- 按用户安装到 `%LOCALAPPDATA%\Programs\dsh-luncher`，不需要管理员权限
-- 用户数据（配置、会话、版本）放在 `%LOCALAPPDATA%\dsh-luncher`，卸载时保留
-- 卸载：开始菜单「Uninstall dsh-luncher」，或设置 → 应用
+安装向导会让你选**两个**目录：
+
+| 页面 | 默认 | 放什么 |
+|---|---|---|
+| 安装位置 | `D:\dsh-luncher`（没有 D 盘则退回 `%LOCALAPPDATA%\Programs\dsh-luncher`） | 程序文件，约 2 MB |
+| 数据目录 | `<安装目录>\data` | 已下载的 dsh 版本、实例配置、日志，通常几百 MB |
+
+两个都可以改，想省 C 盘就把它们指到别的盘。静默安装：
+
+```powershell
+dsh-luncher-setup-1.4.0.exe /VERYSILENT /DIR="D:\Apps\dsh-luncher" /DATADIR="D:\Apps\dsh-luncher\data"
+```
+
+- 按用户安装，不需要管理员权限
+- 卸载时会问要不要一起删数据目录（默认**不删**）
+- 从 1.3.x 升级：首次启动会提示把 `%LOCALAPPDATA%\dsh-luncher` 的数据搬到新目录（用 robocopy，能处理超长路径）
 
 > **从 1.0.x 升级**：旧版名字是 `dsh-launcher`，AppId 不同，请先卸载旧版再装这个。首次启动会把 `%LOCALAPPDATA%\dsh-launcher` 的数据自动迁移到 `%LOCALAPPDATA%\dsh-luncher`。
 

@@ -11,15 +11,19 @@ param([switch]$SmokeTest, [switch]$Import)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
-$script:Root         = $PSScriptRoot
-# 安装版（存在 installed.flag）把用户数据放到 %LOCALAPPDATA%；便携版放脚本旁边
-$script:DataRoot     = if (Test-Path (Join-Path $script:Root 'installed.flag')) { Join-Path $env:LOCALAPPDATA 'dsh-luncher' } else { $script:Root }
+$script:Root = $PSScriptRoot
 
-# 从旧名字 dsh-luncher 迁移一次数据目录
-$legacyData = Join-Path $env:LOCALAPPDATA 'dsh-launcher'
-if ((Test-Path (Join-Path $script:Root 'installed.flag')) -and -not (Test-Path $script:DataRoot) -and (Test-Path $legacyData)) {
-    try { Move-Item $legacyData $script:DataRoot -Force } catch { }
+# 数据目录：安装器写下的 data-dir.txt 优先；没有就放在程序旁边（便携模式）
+$dataFile = Join-Path $script:Root 'data-dir.txt'
+$script:DataRoot = $script:Root
+if (Test-Path $dataFile) {
+    $configured = Get-Content $dataFile -Raw -ErrorAction SilentlyContinue
+    if ($configured) {
+        $configured = $configured.Trim()
+        if ($configured) { $script:DataRoot = $configured }
+    }
 }
+
 $script:ConfigPath   = Join-Path $script:DataRoot 'launcher.json'
 $script:VersionsRoot = Join-Path $script:DataRoot 'versions'
 $script:HomesRoot    = Join-Path $script:DataRoot 'homes'
@@ -81,6 +85,61 @@ function Set-Theme ([string]$name) {
     $script:Theme = $name
     $button = $script:Window.FindName('btnTheme')
     if ($button) { $button.Content = if ($name -eq 'light') { '深色' } else { '浅色' } }
+}
+
+function Repair-ConfigPaths ([string]$oldRoot, [string]$newRoot) {
+    $configPath = Join-Path $newRoot 'launcher.json'
+    if (-not (Test-Path $configPath)) { return }
+    try {
+        $cfg = Get-Content $configPath -Raw -Encoding utf8 | ConvertFrom-Json
+        foreach ($inst in @($cfg.instances)) {
+            foreach ($prop in @('dshHome', 'bin', 'source')) {
+                $value = $inst.$prop
+                if ($value -and $value.StartsWith($oldRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                    $inst.$prop = $newRoot + $value.Substring($oldRoot.Length)
+                }
+            }
+        }
+        $cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
+    } catch { }
+}
+
+function Invoke-DataMigration {
+    if (-not (Test-Path $dataFile)) { return }
+    if (Test-Path (Join-Path $script:DataRoot 'launcher.json')) { return }
+
+    $legacyDirs = @(
+        (Join-Path $env:LOCALAPPDATA 'dsh-luncher'),
+        (Join-Path $env:LOCALAPPDATA 'dsh-launcher')
+    )
+
+    foreach ($legacy in $legacyDirs) {
+        if (-not (Test-Path $legacy)) { continue }
+        $prompt = '检测到旧数据目录：' + [Environment]::NewLine + $legacy +
+            [Environment]::NewLine + [Environment]::NewLine +
+            '是否迁移到新的数据目录？' + [Environment]::NewLine + $script:DataRoot +
+            [Environment]::NewLine + [Environment]::NewLine +
+            '迁移会把已下载的版本和配置搬过去，可能需要几分钟。选「否」则从空目录开始，旧数据原样保留。'
+        $answer = [System.Windows.MessageBox]::Show($prompt, '迁移数据', 'YesNo', 'Question')
+        if ($answer -ne 'Yes') { return }
+
+        try {
+            if (Test-Path $script:DataRoot) { Remove-Item $script:DataRoot -Recurse -Force -ErrorAction SilentlyContinue }
+            $parent = Split-Path $script:DataRoot -Parent
+            if ($parent -and -not (Test-Path $parent)) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
+
+            # robocopy 能处理超过 260 字符的 node_modules 路径，Move-Item 会失败
+            $robocopy = Start-Process -FilePath 'robocopy.exe' -ArgumentList @(
+                $legacy, $script:DataRoot, '/E', '/MOVE', '/R:1', '/W:1', '/NFL', '/NDL', '/NJH', '/NJS', '/NP'
+            ) -Wait -PassThru -WindowStyle Hidden
+            if ($robocopy.ExitCode -ge 8) { throw ('robocopy 退出码 ' + $robocopy.ExitCode) }
+
+            if (-not (Test-Path $script:DataRoot)) { New-Item -ItemType Directory -Path $script:DataRoot -Force | Out-Null }
+            Repair-ConfigPaths $legacy $script:DataRoot
+            if (Test-Path $legacy) { Remove-Item $legacy -Recurse -Force -ErrorAction SilentlyContinue }
+        } catch { }
+        return
+    }
 }
 
 function Get-NpmPath {
@@ -794,6 +853,8 @@ $script:TxtLogPath    = $window.FindName('txtLogPath')
 $script:TxtInstallState = $window.FindName('txtInstallState')
 $script:LblLatest     = $window.FindName('lblLatest')
 $script:BtnInstall    = $window.FindName('btnInstall')
+
+Invoke-DataMigration
 
 $script:Cfg = Read-Config
 $script:Window = $window
