@@ -109,6 +109,25 @@ logs\                 每次启动的 stdout / stderr 日志
 
 更新时会把当前的 `/DIR` 和 `/DATADIR` 原样传给新安装包，所以装到 D 盘、数据在 `D:\...\data` 的配置不会被打乱。
 
+## 数据布局
+
+每个实例是一个**独立文件夹**，配置和元数据都在里面，拷走就能用：
+
+```
+<数据目录>\
+├── settings.json              全局设置（主题、下载源）
+├── versions\<版本>\           已下载的 dsh（多实例共享）
+├── instances\
+│   └── <实例名>\
+│       ├── instance.json      版本、端口、工作目录
+│       └── home\              DSH_HOME：settings.yaml、凭证、会话
+└── logs\
+```
+
+启动器启动时扫描 `instances\*` 目录得到实例列表，不再有中心清单文件。删除实例 = 删掉那个文件夹。
+
+> 从 1.6.x 升级：首次启动会把 `launcher.json` + `homes\<名字>\` 自动迁移成上面的结构，原文件改名成 `launcher.json.migrated` 留底。
+
 ## 下载源
 
 右侧「下载源」下拉可以切换 npm 镜像，内置：

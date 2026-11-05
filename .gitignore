@@ -1,8 +1,12 @@
 # 用户数据：包含凭证、会话、日志，绝不能提交
 homes/
+instances/
 logs/
 versions/
+settings.json
 launcher.json
+launcher.json.migrated
+data-dir.txt
 /installed.flag
 *.log
 

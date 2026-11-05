@@ -94,10 +94,11 @@ if (Test-Path $dataFile) {
     }
 }
 
-$script:ConfigPath   = Join-Path $script:DataRoot 'launcher.json'
-$script:VersionsRoot = Join-Path $script:DataRoot 'versions'
-$script:HomesRoot    = Join-Path $script:DataRoot 'homes'
-$script:LogsRoot     = Join-Path $script:DataRoot 'logs'
+$script:SettingsPath  = Join-Path $script:DataRoot 'settings.json'
+$script:LegacyConfig  = Join-Path $script:DataRoot 'launcher.json'
+$script:VersionsRoot  = Join-Path $script:DataRoot 'versions'
+$script:InstancesRoot = Join-Path $script:DataRoot 'instances'
+$script:LogsRoot      = Join-Path $script:DataRoot 'logs'
 $script:SeedFiles    = @('settings.yaml', '.credentials.yaml', '.env')
 $script:Running      = @{}
 $script:Install      = $null
@@ -106,7 +107,7 @@ $script:Registry     = $null
 $script:LastHash     = ''
 $script:Headless     = $false
 
-foreach ($d in @($script:VersionsRoot, $script:HomesRoot, $script:LogsRoot)) {
+foreach ($d in @($script:VersionsRoot, $script:InstancesRoot, $script:LogsRoot)) {
     if (-not (Test-Path $d)) { New-Item -ItemType Directory -Path $d -Force | Out-Null }
 }
 
@@ -163,33 +164,79 @@ function Set-Registry ([string]$url) {
 }
 
 function New-DefaultConfig {
-    [ordered]@{ version = 1; theme = 'light'; registry = 'https://registry.npmjs.org/'; instances = @() }
+    [ordered]@{ version = 2; theme = 'light'; registry = 'https://registry.npmjs.org/' }
 }
 
 function Read-Config {
-    if (-not (Test-Path $script:ConfigPath)) { return (New-DefaultConfig) }
-    $raw = Get-Content $script:ConfigPath -Raw -Encoding utf8 | ConvertFrom-Json
+    if (-not (Test-Path $script:SettingsPath)) { return (New-DefaultConfig) }
+    try {
+        $raw = Get-Content $script:SettingsPath -Raw -Encoding utf8 | ConvertFrom-Json
+    } catch {
+        return (New-DefaultConfig)
+    }
     $cfg = New-DefaultConfig
     if ($raw.PSObject.Properties['theme'] -and $raw.theme -in @('light', 'dark')) { $cfg.theme = $raw.theme }
     if ($raw.PSObject.Properties['registry'] -and $raw.registry) { $cfg.registry = $raw.registry }
-    if ($raw.PSObject.Properties['instances'] -and $raw.instances) { $cfg.instances = @($raw.instances) }
     return $cfg
 }
 
 function Save-Config {
     try {
-        $dir = Split-Path $script:ConfigPath -Parent
+        $dir = Split-Path $script:SettingsPath -Parent
         if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-        $script:Cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding utf8
+        $script:Cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $script:SettingsPath -Encoding utf8
     } catch {
         Write-Crash 'Save-Config' $_
         throw
     }
 }
 
+# 实例 = instances<名字>{instance.json, home}；列表靠扫描目录得到，不再有中心清单
 function Get-Instances {
-    if (-not $script:Cfg.instances) { return @() }
-    return @($script:Cfg.instances)
+    if (-not (Test-Path $script:InstancesRoot)) { return @() }
+    $list = @()
+    foreach ($dir in @(Get-ChildItem $script:InstancesRoot -Directory -ErrorAction SilentlyContinue)) {
+        $file = Join-Path $dir.FullName 'instance.json'
+        if (-not (Test-Path $file)) { continue }
+        try {
+            $data = Get-Content $file -Raw -Encoding utf8 | ConvertFrom-Json
+            $data | Add-Member -NotePropertyName dir -NotePropertyValue $dir.FullName -Force
+            $list += $data
+        } catch { }
+    }
+    return @($list | Sort-Object name)
+}
+
+function Get-InstanceDir ([string]$name) {
+    return (Join-Path $script:InstancesRoot $name)
+}
+
+function Get-InstanceHome ($inst) {
+    if ($inst.dir) { return (Join-Path $inst.dir 'home') }
+    return (Join-Path (Get-InstanceDir $inst.name) 'home')
+}
+
+function Save-Instance ($inst) {
+    $dir = $inst.dir
+    if (-not $dir) { $dir = Get-InstanceDir $inst.name }
+    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+
+    $payload = [ordered]@{
+        name       = $inst.name
+        dshVersion = $inst.dshVersion
+        port       = $inst.port
+        cwd        = $inst.cwd
+        notes      = $inst.notes
+    }
+    if ($inst.bin) { $payload.bin = $inst.bin }
+    if ($inst.source) { $payload.source = $inst.source }
+    $payload | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'instance.json') -Encoding utf8
+    return $dir
+}
+
+function Remove-InstanceDir ($inst) {
+    $dir = if ($inst.dir) { $inst.dir } else { Get-InstanceDir $inst.name }
+    if (Test-Path $dir) { Remove-Directory $dir }
 }
 
 # ------------------------------------------------------------------ 工具
@@ -215,26 +262,63 @@ function Set-Theme ([string]$name) {
     if ($button) { $button.Content = if ($name -eq 'light') { '深色' } else { '浅色' } }
 }
 
-function Repair-ConfigPaths ([string]$oldRoot, [string]$newRoot) {
-    $configPath = Join-Path $newRoot 'launcher.json'
-    if (-not (Test-Path $configPath)) { return }
+function Invoke-LayoutMigration {
+    # 旧布局 launcher.json + homes\<name>\  ->  新布局 instances\<name>\{instance.json, home\}
+    if (-not (Test-Path $script:LegacyConfig)) { return }
     try {
-        $cfg = Get-Content $configPath -Raw -Encoding utf8 | ConvertFrom-Json
-        foreach ($inst in @($cfg.instances)) {
-            foreach ($prop in @('dshHome', 'bin', 'source')) {
-                $value = $inst.$prop
-                if ($value -and $value.StartsWith($oldRoot, [StringComparison]::OrdinalIgnoreCase)) {
-                    $inst.$prop = $newRoot + $value.Substring($oldRoot.Length)
-                }
+        $legacy = Get-Content $script:LegacyConfig -Raw -Encoding utf8 | ConvertFrom-Json
+    } catch {
+        return
+    }
+
+    foreach ($inst in @($legacy.instances)) {
+        if (-not $inst -or -not $inst.name) { continue }
+        $dir = Join-Path $script:InstancesRoot $inst.name
+        if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+
+        $payload = [ordered]@{
+            name       = $inst.name
+            dshVersion = $inst.dshVersion
+            port       = $inst.port
+            cwd        = $inst.cwd
+            notes      = $inst.notes
+        }
+        if ($inst.bin) { $payload.bin = $inst.bin }
+        if ($inst.source) { $payload.source = $inst.source }
+        $payload | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'instance.json') -Encoding utf8
+
+        $oldHome = $inst.dshHome
+        if ($oldHome -and (Test-Path $oldHome)) {
+            $newHome = Join-Path $dir 'home'
+            if (-not (Test-Path $newHome)) {
+                try { Move-Item $oldHome $newHome -Force } catch { }
             }
         }
-        $cfg | ConvertTo-Json -Depth 10 | Set-Content $configPath -Encoding utf8
-    } catch { }
+    }
+
+    $settings = New-DefaultConfig
+    if ($legacy.PSObject.Properties['theme'] -and $legacy.theme) { $settings.theme = $legacy.theme }
+    if ($legacy.PSObject.Properties['registry'] -and $legacy.registry) { $settings.registry = $legacy.registry }
+    $settings | ConvertTo-Json -Depth 5 | Set-Content $script:SettingsPath -Encoding utf8
+
+    Rename-Item $script:LegacyConfig ($script:LegacyConfig + '.migrated') -Force -ErrorAction SilentlyContinue
+
+    # 清掉空的旧 homes 目录
+    $oldHomes = Join-Path $script:DataRoot 'homes'
+    if ((Test-Path $oldHomes) -and (@(Get-ChildItem $oldHomes -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+        Remove-Item $oldHomes -Force -ErrorAction SilentlyContinue
+    }
 }
 
 function Invoke-DataMigration {
-    if (-not (Test-Path $dataFile)) { return }
-    if (Test-Path (Join-Path $script:DataRoot 'launcher.json')) { return }
+    $hasData = (Test-Path $script:SettingsPath) -or
+        (@(Get-ChildItem $script:InstancesRoot -Directory -ErrorAction SilentlyContinue).Count -gt 0) -or
+        (Test-Path $script:LegacyConfig)
+
+    if (-not (Test-Path $dataFile) -or $hasData) {
+        Invoke-LayoutMigration
+        return
+    }
 
     $legacyDirs = @(
         (Join-Path $env:LOCALAPPDATA 'dsh-luncher'),
@@ -263,11 +347,12 @@ function Invoke-DataMigration {
             if ($robocopy.ExitCode -ge 8) { throw ('robocopy 退出码 ' + $robocopy.ExitCode) }
 
             if (-not (Test-Path $script:DataRoot)) { New-Item -ItemType Directory -Path $script:DataRoot -Force | Out-Null }
-            Repair-ConfigPaths $legacy $script:DataRoot
             if (Test-Path $legacy) { Remove-Item $legacy -Recurse -Force -ErrorAction SilentlyContinue }
         } catch { }
-        return
+        break
     }
+
+    Invoke-LayoutMigration
 }
 
 function Get-AppVersion {
@@ -526,7 +611,7 @@ function Start-Instance ($inst) {
         }
     }
 
-    $homePath = $inst.dshHome
+    $homePath = Get-InstanceHome $inst
     if (-not (Test-Path $homePath)) {
         New-Item -ItemType Directory -Path $homePath -Force | Out-Null
         Seed-Home $homePath
@@ -605,7 +690,7 @@ function Refresh-InstanceList {
             Version = $label
             Port    = $inst.port
             Status  = $status
-            Home    = $inst.dshHome
+            Home    = (Get-InstanceHome $inst)
         }
     }
     $script:LstInstances.ItemsSource = $rows
@@ -830,23 +915,18 @@ function Remove-Version ([string]$version, [bool]$deleteInstances, [bool]$delete
 
     if ($deleteInstances) {
         foreach ($inst in $usage.Npm) {
-            if (Remove-Directory $inst.dshHome) { $removed += ('home ' + $inst.name) }
+            Remove-InstanceDir $inst
+            $removed += ('实例 ' + $inst.name)
         }
     }
 
     if ($deleteSources) {
         foreach ($inst in $usage.Source) {
             if (Remove-Directory $inst.source) { $removed += ('source ' + $inst.source) }
-            if (Remove-Directory $inst.dshHome) { $removed += ('home ' + $inst.name) }
+            Remove-InstanceDir $inst
+            $removed += ('实例 ' + $inst.name)
         }
     }
-
-    $script:Cfg.instances = @(Get-Instances | Where-Object {
-        if ($_.dshVersion -ne $version) { return $true }
-        if ($_.source) { return (-not $deleteSources) }
-        return (-not $deleteInstances)
-    })
-    Save-Config
 
     Refresh-InstanceList
     Refresh-VersionList
@@ -861,7 +941,7 @@ function Invoke-RemoveVersion ([string]$version) {
     $versionSize = Get-DirSize $versionDir
 
     $homeSize = [long]0
-    foreach ($inst in @($usage.Npm) + @($usage.Source)) { $homeSize += (Get-DirSize $inst.dshHome) }
+    foreach ($inst in @($usage.Npm) + @($usage.Source)) { $homeSize += (Get-DirSize (Get-InstanceHome $inst)) }
 
     $sourceSize = [long]0
     foreach ($inst in $usage.Source) { $sourceSize += (Get-DirSize $inst.source) }
@@ -1034,16 +1114,14 @@ function Import-Local {
         $name = ($info.version -replace '[^\w\.\-]', '_')
         if (Get-Instances | Where-Object { $_.name -eq $name }) { $name = $name + '-' + $added }
 
-        $homePath = Join-Path $script:HomesRoot $name
-        $script:Cfg.instances = @(Get-Instances) + [ordered]@{
-            name        = $name
-            dshVersion  = $info.version
-            bin         = $bin
-            dshHome     = $homePath
-            port        = (Get-FreePort)
-            cwd         = (Get-Location).Path
-            notes       = 'imported'
-        }
+        Save-Instance ([pscustomobject]@{
+            name       = $name
+            dshVersion = $info.version
+            bin        = $bin
+            port       = (Get-FreePort)
+            cwd        = (Get-Location).Path
+            notes      = 'imported'
+        }) | Out-Null
         $added++
     }
 
@@ -1051,7 +1129,6 @@ function Import-Local {
         if (-not $script:Headless) { [System.Windows.MessageBox]::Show('没有发现新的本机 dsh 安装。', '导入') | Out-Null }
         return 0
     }
-    Save-Config
     if (-not $script:Headless) {
         Refresh-InstanceList
         Append-Log ('已导入 ' + $added + ' 个本机实例。' + [Environment]::NewLine)
@@ -1220,17 +1297,15 @@ $window.FindName('btnOpen').Add_Click({
 $window.FindName('btnAdd').Add_Click({
     $result = Show-AddDialog
     if (-not $result) { return }
-    $homePath = Join-Path $script:HomesRoot $result.Name
-    $script:Cfg.instances = @(Get-Instances) + [ordered]@{
+    $created = Save-Instance ([pscustomobject]@{
         name       = $result.Name
         dshVersion = $result.Version
         bin        = (Get-BinPath $result.Version)
-        dshHome    = $homePath
         port       = $result.Port
         cwd        = $result.Cwd
         notes      = ''
-    }
-    Save-Config
+    })
+    $homePath = Join-Path $created 'home'
     if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null; Seed-Home $homePath }
     Refresh-InstanceList
 })
@@ -1238,11 +1313,13 @@ $window.FindName('btnAdd').Add_Click({
 $window.FindName('btnRemove').Add_Click({
     $inst = Get-SelectedInstance
     if (-not $inst) { return }
-    $answer = [System.Windows.MessageBox]::Show('删除实例「' + $inst.name + '」？' + [Environment]::NewLine + '仅删除配置，不删除 home 目录。', '确认', 'YesNo')
+    $answer = [System.Windows.MessageBox]::Show(
+        '删除实例「' + $inst.name + '」？' + [Environment]::NewLine + [Environment]::NewLine +
+        '会连同它的配置目录一起删除：' + [Environment]::NewLine + (Get-InstanceHome $inst),
+        '确认', 'YesNo', 'Warning')
     if ($answer -ne 'Yes') { return }
     if ($script:Running[$inst.name]) { Stop-Instance $inst.name }
-    $script:Cfg.instances = @(Get-Instances | Where-Object { $_.name -ne $inst.name })
-    Save-Config
+    Remove-InstanceDir $inst
     Refresh-InstanceList
 })
 
@@ -1322,17 +1399,15 @@ $window.FindName('btnAddSource').Add_Click({
     $n = 1
     while (Get-Instances | Where-Object { $_.name -eq $instanceName }) { $n++; $instanceName = $base + '-' + $n }
 
-    $homePath = Join-Path $script:HomesRoot $instanceName
-    $script:Cfg.instances = @(Get-Instances) + [ordered]@{
+    $created = Save-Instance ([pscustomobject]@{
         name       = $instanceName
         dshVersion = $ver
         source     = $dir
-        dshHome    = $homePath
         port       = (Get-FreePort)
         cwd        = $dir
         notes      = 'source'
-    }
-    Save-Config
+    })
+    $homePath = Join-Path $created 'home'
     if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null; Seed-Home $homePath }
     Refresh-InstanceList
     Append-Log ('已添加源码实例 ' + $instanceName + ' -> ' + $dir + [Environment]::NewLine)
