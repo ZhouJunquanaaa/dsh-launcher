@@ -92,8 +92,29 @@ logs\                 每次启动的 stdout / stderr 日志
 | 导入本机 | 扫描 nvm 安装的 dsh，生成实例 |
 | 检查更新 | 查 registry 的 dist-tags（latest / next / alpha），右侧可一键装到 `versions\` |
 | 删除版本 | 删除已安装的 dsh 版本；可勾选连带删除使用它的实例、配置目录（DSH_HOME）和源码 checkout |
+| 下载源 | 切换 npm 镜像；「测速」测当前源的响应延迟 |
 
 > dsh web 启动时会打印 `http://127.0.0.1:<port>/?token=...`，启动器会从日志里抓这个 token，直接用裸地址打开会过不了浏览器信任校验。
+
+## 下载源
+
+右侧「下载源」下拉可以切换 npm 镜像，内置：
+
+| 名称 | 地址 |
+|---|---|
+| npm 官方 | `https://registry.npmjs.org/` |
+| 淘宝 npmmirror | `https://registry.npmmirror.com/` |
+| 腾讯云 | `https://mirrors.cloud.tencent.com/npm/` |
+| 华为云 | `https://repo.huaweicloud.com/repository/npm/` |
+
+下拉框可以直接编辑——填任意 registry 地址（`https://...`）就按自定义源处理。选择存在 `launcher.json` 的 `registry` 字段。
+
+切换后：
+
+- **检查更新** 从该源拉 `dist-tags`
+- **下载并安装** 给 npm 传 `--registry <地址>`
+
+本机实测（同一时刻）：npm 官方 1450 ms、淘宝 206 ms、腾讯云 378 ms、华为云 194 ms。装同一个版本，官方源约 35 秒，淘宝源约 2 分钟（首次冷启动解析慢，后续会快）。
 
 ## 源码模式准备
 

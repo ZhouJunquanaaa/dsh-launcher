@@ -42,8 +42,58 @@ foreach ($d in @($script:VersionsRoot, $script:HomesRoot, $script:LogsRoot)) {
 
 # ------------------------------------------------------------------ 配置
 
+$script:Registries = @(
+    [pscustomobject]@{ Name = 'npm 官方'; Url = 'https://registry.npmjs.org/' }
+    [pscustomobject]@{ Name = '淘宝 npmmirror'; Url = 'https://registry.npmmirror.com/' }
+    [pscustomobject]@{ Name = '腾讯云'; Url = 'https://mirrors.cloud.tencent.com/npm/' }
+    [pscustomobject]@{ Name = '华为云'; Url = 'https://repo.huaweicloud.com/repository/npm/' }
+)
+
+function Get-RegistryUrl {
+    if ($script:Cfg -and $script:Cfg.registry) { return $script:Cfg.registry }
+    return 'https://registry.npmjs.org/'
+}
+
+function Get-RegistryLabel ([string]$url) {
+    foreach ($item in $script:Registries) {
+        if ($item.Url -eq $url) { return $item.Name }
+    }
+    return $url
+}
+
+function Resolve-RegistryInput ([string]$text) {
+    if (-not $text) { return $null }
+    $text = $text.Trim()
+    if ($text -match '^https?://') { return $text }
+    foreach ($item in $script:Registries) {
+        if ($item.Name -eq $text) { return $item.Url }
+    }
+    return $null
+}
+
+function Update-RegistryHint {
+    if (-not $script:TxtRegistryHint) { return }
+    $url = Get-RegistryUrl
+    $label = Get-RegistryLabel $url
+    if ($label -eq $url) {
+        $script:TxtRegistryHint.Text = '当前：' + $url
+    } else {
+        $script:TxtRegistryHint.Text = '当前：' + $label + '  ' + $url
+    }
+}
+
+function Set-Registry ([string]$url) {
+    if (-not $url) { return }
+    if ($url -ne $script:Cfg.registry) {
+        $script:Cfg.registry = $url
+        Save-Config
+        Append-Log ('下载源切换为 ' + $url + [Environment]::NewLine)
+    }
+    Update-RegistryHint
+}
+
 function New-DefaultConfig {
-    [ordered]@{ version = 1; theme = 'light'; instances = @() }
+    [ordered]@{ version = 1; theme = 'light'; registry = 'https://registry.npmjs.org/'; instances = @() }
 }
 
 function Read-Config {
@@ -51,6 +101,7 @@ function Read-Config {
     $raw = Get-Content $script:ConfigPath -Raw -Encoding utf8 | ConvertFrom-Json
     $cfg = New-DefaultConfig
     if ($raw.PSObject.Properties['theme'] -and $raw.theme -in @('light', 'dark')) { $cfg.theme = $raw.theme }
+    if ($raw.PSObject.Properties['registry'] -and $raw.registry) { $cfg.registry = $raw.registry }
     if ($raw.PSObject.Properties['instances'] -and $raw.instances) { $cfg.instances = @($raw.instances) }
     return $cfg
 }
@@ -211,7 +262,8 @@ function Get-InstalledVersions {
 }
 
 function Get-RegistryInfo {
-    $m = Invoke-RestMethod 'https://registry.npmjs.org/@deepseek-ai/dsh' -TimeoutSec 25
+    $base = (Get-RegistryUrl).TrimEnd('/')
+    $m = Invoke-RestMethod ($base + '/@deepseek-ai%2Fdsh') -TimeoutSec 25
     return [pscustomobject]@{
         Latest   = $m.'dist-tags'.latest
         Next     = $m.'dist-tags'.next
@@ -429,7 +481,8 @@ function Install-Version ([string]$version) {
     # 注意：不能写成 @('i','-g','@deepseek-ai/dsh@' + $version, ...) —— 数组字面量里的 + 会被拆成两个元素
     $npm = Get-NpmPath
     $spec = '@deepseek-ai/dsh@' + $version
-    $proc = Start-Process -FilePath $npm -ArgumentList @('i', '-g', $spec, '--prefix', $target, '--no-audit', '--no-fund') -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
+    $registry = Get-RegistryUrl
+    $proc = Start-Process -FilePath $npm -ArgumentList @('i', '-g', $spec, '--prefix', $target, '--registry', $registry, '--no-audit', '--no-fund') -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WindowStyle Hidden -PassThru
 
     $script:Install = @{ Process = $proc; Version = $version; Log = $outLog }
     $script:Tail = @(
@@ -861,6 +914,12 @@ $script:Window = $window
 $script:Theme = $(if ($script:Cfg.theme -in @('light', 'dark')) { $script:Cfg.theme } else { 'light' })
 Set-Theme $script:Theme
 
+$script:CmbRegistry = $window.FindName('cmbRegistry')
+$script:TxtRegistryHint = $window.FindName('txtRegistryHint')
+$script:CmbRegistry.ItemsSource = @($script:Registries | ForEach-Object { $_.Name })
+$script:CmbRegistry.Text = Get-RegistryLabel (Get-RegistryUrl)
+Update-RegistryHint
+
 function Update-Tick {
     Read-NewLog
 
@@ -978,6 +1037,35 @@ $window.FindName('btnRemove').Add_Click({
 })
 
 $window.FindName('btnImport').Add_Click({ Import-Local })
+
+$window.FindName('cmbRegistry').Add_SelectionChanged({
+    try {
+        $picked = Resolve-RegistryInput $script:CmbRegistry.Text
+        if ($picked) { Set-Registry $picked }
+    } catch { }
+})
+
+$window.FindName('cmbRegistry').Add_LostFocus({
+    try {
+        $typed = Resolve-RegistryInput $script:CmbRegistry.Text
+        if ($typed) { Set-Registry $typed } else { Update-RegistryHint }
+    } catch { }
+})
+
+$window.FindName('btnTestRegistry').Add_Click({
+    try {
+        $url = Resolve-RegistryInput $script:CmbRegistry.Text
+        if (-not $url) { $url = Get-RegistryUrl }
+        $base = $url.TrimEnd('/')
+        $script:TxtRegistryHint.Text = '测速中：' + $base
+        $watch = [System.Diagnostics.Stopwatch]::StartNew()
+        $null = Invoke-RestMethod ($base + '/@deepseek-ai%2Fdsh') -TimeoutSec 10
+        $watch.Stop()
+        $script:TxtRegistryHint.Text = (Get-RegistryLabel $url) + '：' + [int]$watch.ElapsedMilliseconds + ' ms'
+    } catch {
+        $script:TxtRegistryHint.Text = '测速失败：' + $_.Exception.Message
+    }
+})
 
 $window.FindName('btnTheme').Add_Click({
     try {

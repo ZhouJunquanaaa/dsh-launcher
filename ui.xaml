@@ -1,6 +1,6 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="dsh-luncher" Height="800" Width="1240"
+        Title="dsh-luncher" Height="880" Width="1240"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource WindowBrush}"
         Foreground="{DynamicResource TextBrush}"
@@ -237,13 +237,14 @@
           <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="Auto"/>
           </Grid.RowDefinitions>
 
           <TextBlock Grid.Row="0" Text="已安装版本" Style="{StaticResource SectionTitle}"/>
-          <ListView Grid.Row="1" x:Name="lstVersions" Height="150" SelectionMode="Single">
+          <ListView Grid.Row="1" x:Name="lstVersions" Height="120" SelectionMode="Single">
             <ListView.View>
               <GridView>
                 <GridViewColumn Header="版本" Width="150" DisplayMemberBinding="{Binding Version}"/>
@@ -252,19 +253,34 @@
             </ListView.View>
           </ListView>
 
-          <StackPanel Grid.Row="2" Margin="0,18,0,0">
+          <StackPanel Grid.Row="2" Margin="0,12,0,0">
+            <TextBlock Text="下载源" Style="{StaticResource SectionTitle}"/>
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+              </Grid.ColumnDefinitions>
+              <ComboBox Grid.Column="0" x:Name="cmbRegistry" Height="32" IsEditable="True" Margin="0"/>
+              <Button Grid.Column="1" x:Name="btnTestRegistry" Content="测速"
+                      Style="{StaticResource GhostButton}" Margin="8,0,0,0"/>
+            </Grid>
+            <TextBlock x:Name="txtRegistryHint" Style="{StaticResource MutedText}"
+                       TextWrapping="Wrap" Margin="0,6,0,0"/>
+          </StackPanel>
+
+          <StackPanel Grid.Row="3" Margin="0,12,0,0">
             <TextBlock Text="安装新版本" Style="{StaticResource SectionTitle}"/>
             <ComboBox x:Name="cmbAvailable" Height="32"/>
             <TextBlock Text="安装到 versions\ 目录，不影响全局 npm 与 nvm。"
                        Style="{StaticResource MutedText}" TextWrapping="Wrap" Margin="0,8,0,0"/>
           </StackPanel>
 
-          <StackPanel Grid.Row="3" Orientation="Horizontal" Margin="0,14,0,0">
+          <StackPanel Grid.Row="4" Orientation="Horizontal" Margin="0,14,0,0">
             <Button x:Name="btnInstall" Content="下载并安装" Style="{StaticResource PrimaryButton}"/>
             <Button x:Name="btnRemoveVersion" Content="删除版本" Margin="0"/>
           </StackPanel>
 
-          <TextBlock Grid.Row="4" x:Name="txtInstallState" Text="" Style="{StaticResource MutedText}"
+          <TextBlock Grid.Row="5" x:Name="txtInstallState" Text="" Style="{StaticResource MutedText}"
                      Margin="0,10,0,0" TextWrapping="Wrap"/>
         </Grid>
       </Border>
