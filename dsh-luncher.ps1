@@ -177,7 +177,14 @@ function Read-Config {
 }
 
 function Save-Config {
-    $script:Cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding utf8
+    try {
+        $dir = Split-Path $script:ConfigPath -Parent
+        if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
+        $script:Cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $script:ConfigPath -Encoding utf8
+    } catch {
+        Write-Crash 'Save-Config' $_
+        throw
+    }
 }
 
 function Get-Instances {
@@ -412,9 +419,16 @@ function Get-InstalledVersions {
     $rows = @()
     foreach ($d in @(Get-ChildItem $script:VersionsRoot -Directory -ErrorAction SilentlyContinue)) {
         $pkg = Join-Path $d.FullName 'node_modules\@deepseek-ai\dsh\package.json'
-        if (Test-Path $pkg) {
-            $v = (Get-Content $pkg -Raw -Encoding utf8 | ConvertFrom-Json).version
-            $rows += [pscustomobject]@{ Version = $v; Source = 'versions\' }
+        if (-not (Test-Path $pkg)) { continue }
+        $v = (Get-Content $pkg -Raw -Encoding utf8 | ConvertFrom-Json).version
+        # 只有 package.json 没有 libin.js 说明装了一半（中断、磁盘满、被占用），标出来
+        $bin = Join-Path $d.FullName 'node_modules\@deepseek-ai\dsh\lib\bin.js'
+        $ok = Test-Path $bin
+        $rows += [pscustomobject]@{
+            Version = $v
+            Source  = 'versions\'
+            Display = $(if ($ok) { $v } else { $v + '（不完整）' })
+            Ok      = $ok
         }
     }
     return @($rows | Sort-Object Version -Descending)
@@ -501,7 +515,13 @@ function Start-Instance ($inst) {
     } else {
         $bin = Get-InstanceBin $inst
         if (-not $bin) {
-            [System.Windows.MessageBox]::Show("版本 $($inst.dshVersion) 的 dsh 未安装到本地 versions 目录。" + [Environment]::NewLine + '请先在右侧【安装新版本】。', '缺少版本') | Out-Null
+            $expected = Get-BinPath $inst.dshVersion
+            $message = '版本 ' + $inst.dshVersion + ' 的 dsh 没有装好（缺少 lib\bin.js）。' +
+                [Environment]::NewLine + [Environment]::NewLine +
+                '期望路径：' + [Environment]::NewLine + $expected +
+                [Environment]::NewLine + [Environment]::NewLine +
+                '请在右侧重新安装该版本；如果列表里显示「不完整」，先删掉再装。'
+            [System.Windows.MessageBox]::Show($message, '缺少版本') | Out-Null
             return
         }
     }
