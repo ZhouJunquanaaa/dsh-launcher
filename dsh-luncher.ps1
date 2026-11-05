@@ -193,6 +193,95 @@ function Invoke-DataMigration {
     }
 }
 
+function Get-AppVersion {
+    $file = Join-Path $script:Root 'version.txt'
+    if (Test-Path $file) {
+        $value = Get-Content $file -Raw -ErrorAction SilentlyContinue
+        if ($value) { $value = $value.Trim() }
+        if ($value) { return $value }
+    }
+    return '0.0.0'
+}
+
+function Compare-AppVersion ([string]$left, [string]$right) {
+    try {
+        return ([version]($left -replace '^v', '')).CompareTo([version]($right -replace '^v', ''))
+    } catch { return 0 }
+}
+
+function Update-AppVersionLabel {
+    if (-not $script:BtnAppUpdate) { return }
+    $current = Get-AppVersion
+    if ($script:LatestRelease -and (Compare-AppVersion $script:LatestRelease.tag_name $current) -gt 0) {
+        $script:BtnAppUpdate.Content = '更新到 ' + $script:LatestRelease.tag_name
+        $script:BtnAppUpdate.SetResourceReference([System.Windows.Controls.Control]::ForegroundProperty, 'AccentBrush')
+    } else {
+        $script:BtnAppUpdate.Content = 'v' + $current
+        $script:BtnAppUpdate.SetResourceReference([System.Windows.Controls.Control]::ForegroundProperty, 'MutedBrush')
+    }
+}
+
+function Check-AppUpdate ([switch]$Silent) {
+    $current = Get-AppVersion
+    try {
+        $script:LatestRelease = Invoke-RestMethod 'https://api.github.com/repos/ZhouJunquanaaa/dsh-launcher/releases/latest' -Headers @{ 'User-Agent' = 'dsh-luncher'; 'Accept' = 'application/vnd.github+json' } -TimeoutSec 20
+    } catch {
+        if (-not $Silent) { [System.Windows.MessageBox]::Show('检查更新失败：' + $_.Exception.Message, '检查更新') | Out-Null }
+        return
+    }
+
+    Update-AppVersionLabel
+    $latest = $script:LatestRelease.tag_name
+    if ((Compare-AppVersion $latest $current) -le 0) {
+        if (-not $Silent) { [System.Windows.MessageBox]::Show('已是最新版本 v' + $current, '检查更新') | Out-Null }
+        return
+    }
+
+    Append-Log ('发现新版本 ' + $latest + '（当前 v' + $current + '）' + [Environment]::NewLine)
+    if (-not $Silent) { Start-AppUpdate }
+}
+
+function Start-AppUpdate {
+    $release = $script:LatestRelease
+    if (-not $release) { return }
+    $current = Get-AppVersion
+
+    $answer = [System.Windows.MessageBox]::Show(
+        '发现新版本 ' + $release.tag_name + '（当前 v' + $current + '）。' + [Environment]::NewLine + [Environment]::NewLine +
+        '现在下载并安装？装完会自动重新打开。',
+        '检查更新', 'YesNo', 'Question')
+    if ($answer -ne 'Yes') { return }
+
+    $asset = @($release.assets | Where-Object { $_.name -like '*.exe' }) | Select-Object -First 1
+    if (-not $asset) {
+        [System.Windows.MessageBox]::Show('该版本没有提供安装包。', '检查更新') | Out-Null
+        return
+    }
+
+    $target = Join-Path $env:TEMP $asset.name
+    Append-Log ('下载 ' + $asset.name + ' ...' + [Environment]::NewLine)
+    try {
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $target -TimeoutSec 300 -UseBasicParsing
+    } catch {
+        [System.Windows.MessageBox]::Show('下载失败：' + $_.Exception.Message, '检查更新') | Out-Null
+        return
+    }
+
+    $arguments = @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/TASKS=desktopicon', ('/DIR="' + $script:Root + '"'))
+    if (Test-Path (Join-Path $script:Root 'data-dir.txt')) {
+        $arguments += ('/DATADIR="' + $script:DataRoot + '"')
+    }
+
+    $exePath = Join-Path $script:Root 'dsh-luncher.exe'
+    $quoted = ($arguments | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ','
+    $helper = 'Start-Process -FilePath ''' + $target + ''' -ArgumentList @(' + $quoted + ') -Wait; Start-Process -FilePath ''' + $exePath + ''''
+    Start-Process -FilePath 'pwsh' -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-Command', $helper) -WindowStyle Hidden
+
+    Append-Log ('已启动安装程序，程序即将退出。' + [Environment]::NewLine)
+    Start-Sleep -Milliseconds 400
+    $script:Window.Close()
+}
+
 function Get-NpmPath {
     foreach ($name in @('npm.cmd', 'npm.exe', 'npm')) {
         $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -920,6 +1009,10 @@ $script:CmbRegistry.ItemsSource = @($script:Registries | ForEach-Object { $_.Nam
 $script:CmbRegistry.Text = Get-RegistryLabel (Get-RegistryUrl)
 Update-RegistryHint
 
+$script:BtnAppUpdate = $window.FindName('btnAppUpdate')
+$script:LatestRelease = $null
+Update-AppVersionLabel
+
 function Update-Tick {
     Read-NewLog
 
@@ -1067,6 +1160,18 @@ $window.FindName('btnTestRegistry').Add_Click({
     }
 })
 
+$window.FindName('btnAppUpdate').Add_Click({
+    try {
+        if ($script:LatestRelease -and (Compare-AppVersion $script:LatestRelease.tag_name (Get-AppVersion)) -gt 0) {
+            Start-AppUpdate
+        } else {
+            Check-AppUpdate
+        }
+    } catch {
+        Show-Error 'btnAppUpdate' $_
+    }
+})
+
 $window.FindName('btnTheme').Add_Click({
     try {
         $next = if ($script:Theme -eq 'light') { 'dark' } else { 'light' }
@@ -1164,6 +1269,10 @@ $window.Add_Closing({
 })
 
 $window.Add_ContentRendered({
+    try {
+        Check-AppUpdate -Silent
+    } catch { }
+
     try {
         $script:Registry = Get-RegistryInfo
         Refresh-VersionList

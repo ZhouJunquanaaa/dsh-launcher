@@ -8,6 +8,7 @@ launcher.json
 
 # 构建产物
 dsh-luncher.exe
+version.txt
 installer/Output/
 installer/*.exe
 dist/

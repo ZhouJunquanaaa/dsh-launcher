@@ -13,6 +13,14 @@ param([switch]$Portable)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
 
+# 版本号以 .iss 为准，写到 version.txt 供程序自检更新用
+$issText = Get-Content (Join-Path $PSScriptRoot 'dsh-luncher.iss') -Raw
+$match = [regex]::Match($issText, '#define AppVersion "([^"]+)"')
+if (-not $match.Success) { throw '无法从 dsh-luncher.iss 读取 AppVersion' }
+$appVersion = $match.Groups[1].Value
+Set-Content -Path (Join-Path $root 'version.txt') -Value $appVersion -Encoding utf8 -NoNewline
+Write-Host "版本号：$appVersion" -ForegroundColor Cyan
+
 # 1. 编译无控制台入口（双击不闪 PowerShell 窗口）
 $csc = @(
     'C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe',
@@ -52,7 +60,7 @@ if ($Portable) {
     $stage = Join-Path $env:TEMP ('dsh-luncher-portable-' + [guid]::NewGuid().ToString('N'))
     New-Item -ItemType Directory -Path $stage -Force | Out-Null
 
-    foreach ($name in @('dsh-luncher.exe', 'dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE')) {
+    foreach ($name in @('dsh-luncher.exe', 'dsh-luncher.ps1', 'dsh-luncher.cmd', 'ui.xaml', 'launcher.ico', 'README.md', 'LICENSE', 'version.txt')) {
         Copy-Item (Join-Path $root $name) $stage
     }
 
