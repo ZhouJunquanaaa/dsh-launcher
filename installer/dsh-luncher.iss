@@ -1,7 +1,7 @@
 ; dsh-luncher 安装脚本（Inno Setup 6）
 ; 编译：ISCC.exe installer\dsh-luncher.iss
 
-#define AppVersion "1.6.0"
+#define AppVersion "1.6.1"
 #define AppName "dsh-luncher"
 #define AppPublisher "ZhouJunquanaaa"
 #define AppUrl "https://github.com/ZhouJunquanaaa/dsh-launcher"
@@ -50,9 +50,9 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\version.txt"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\dsh-luncher.exe"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"
+Name: "{group}\{#AppName}"; Filename: "{app}\dsh-luncher.exe"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"; AppUserModelID: "ZhouJunquanaaa.DshLuncher"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\dsh-luncher.exe"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\dsh-luncher.exe"; IconFilename: "{app}\launcher.ico"; WorkingDir: "{app}"; Tasks: desktopicon; AppUserModelID: "ZhouJunquanaaa.DshLuncher"
 
 [Run]
 Filename: "{app}\dsh-luncher.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent

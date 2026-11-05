@@ -9,6 +9,76 @@
 param([switch]$SmokeTest, [switch]$Import)
 
 $ErrorActionPreference = 'Stop'
+
+# 必须在加载 WPF 之前设 AppUserModelID：WPF 一加载就会建隐藏窗口，
+# 之后进程的 AUMID 就锁定成 pwsh 的了，任务栏会一直显示 PowerShell 图标
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+[StructLayout(LayoutKind.Sequential, Pack = 4)]
+public struct PROPERTYKEY {
+    public Guid fmtid;
+    public uint pid;
+}
+
+[StructLayout(LayoutKind.Explicit)]
+public struct PROPVARIANT {
+    [FieldOffset(0)] public ushort vt;
+    [FieldOffset(8)] public IntPtr pointerValue;
+}
+
+[ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+public interface IPropertyStore {
+    void GetCount(out uint cProps);
+    void GetAt(uint iProp, out PROPERTYKEY pkey);
+    void GetValue(ref PROPERTYKEY key, out PROPVARIANT pv);
+    void SetValue(ref PROPERTYKEY key, ref PROPVARIANT pv);
+    void Commit();
+}
+
+public static class DshTaskbar {
+    [DllImport("shell32.dll")]
+    static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid iid, out IPropertyStore store);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+    public static extern IntPtr LoadImage(IntPtr hinst, string name, uint type, int cx, int cy, uint load);
+
+    public const int WM_SETICON = 0x0080;
+    public const uint IMAGE_ICON = 1;
+    public const uint LR_LOADFROMFILE = 0x0010;
+
+    // 进程级 AUMID 改不动（pwsh 启动时就定了），但可以给单个窗口挂 AUMID，
+    // 任务栏据此分组并取对应快捷方式的图标和名字。
+    public static bool SetWindowAppId(IntPtr hwnd, string appId) {
+        Guid iid = typeof(IPropertyStore).GUID;
+        IPropertyStore store;
+        if (SHGetPropertyStoreForWindow(hwnd, ref iid, out store) != 0 || store == null) return false;
+
+        var key = new PROPERTYKEY();
+        key.fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3");
+        key.pid = 5;
+
+        var pv = new PROPVARIANT();
+        pv.vt = 31;
+        pv.pointerValue = Marshal.StringToCoTaskMemUni(appId);
+        try {
+            store.SetValue(ref key, ref pv);
+            store.Commit();
+        } finally {
+            Marshal.FreeCoTaskMem(pv.pointerValue);
+            Marshal.ReleaseComObject(store);
+        }
+        return true;
+    }
+}
+'@ -ErrorAction Stop
+} catch { }
+
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
 
 $script:Root = $PSScriptRoot
@@ -984,7 +1054,17 @@ $window = [System.Windows.Markup.XamlReader]::Parse((Get-Content (Join-Path $scr
 
 $iconFile = Join-Path $script:Root 'launcher.ico'
 if (Test-Path $iconFile) {
-    try { $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create([Uri]::new($iconFile)) } catch { }
+    # 读进内存再解码，避免一直占着文件导致升级安装替换不掉
+    try {
+        $iconBytes = [System.IO.File]::ReadAllBytes($iconFile)
+        $iconStream = [System.IO.MemoryStream]::new($iconBytes)
+        # OnLoad：立刻解码完，之后关掉流也不会影响渲染（默认是延迟解码，关流后会抛 disposed object）
+        $window.Icon = [System.Windows.Media.Imaging.BitmapFrame]::Create(
+            $iconStream,
+            [System.Windows.Media.Imaging.BitmapCreateOptions]::None,
+            [System.Windows.Media.Imaging.BitmapCacheOption]::OnLoad)
+        $iconStream.Dispose()
+    } catch { }
 }
 
 $script:LstInstances  = $window.FindName('lstInstances')
@@ -997,6 +1077,23 @@ $script:LblLatest     = $window.FindName('lblLatest')
 $script:BtnInstall    = $window.FindName('btnInstall')
 
 Invoke-DataMigration
+
+# 任务栏图标：WPF 只设 Window.Icon 时任务栏仍可能沿用宿主进程（pwsh）的图标，
+# 这里在窗口句柄就绪后直接 WM_SETICON 把大小图标都换掉
+$window.Add_SourceInitialized({
+    try {
+        $handle = [System.Windows.Interop.WindowInteropHelper]::new($window).Handle
+        if ($handle -eq [IntPtr]::Zero) { return }
+
+        # 窗口级 AUMID：任务栏据此分组，并取同名快捷方式的图标和名字
+        [DshTaskbar]::SetWindowAppId($handle, 'ZhouJunquanaaa.DshLuncher') | Out-Null
+
+        $big = [DshTaskbar]::LoadImage([IntPtr]::Zero, $iconFile, [DshTaskbar]::IMAGE_ICON, 32, 32, [DshTaskbar]::LR_LOADFROMFILE)
+        $small = [DshTaskbar]::LoadImage([IntPtr]::Zero, $iconFile, [DshTaskbar]::IMAGE_ICON, 16, 16, [DshTaskbar]::LR_LOADFROMFILE)
+        if ($big -ne [IntPtr]::Zero) { [DshTaskbar]::SendMessage($handle, [DshTaskbar]::WM_SETICON, [IntPtr]1, $big) | Out-Null }
+        if ($small -ne [IntPtr]::Zero) { [DshTaskbar]::SendMessage($handle, [DshTaskbar]::WM_SETICON, [IntPtr]0, $small) | Out-Null }
+    } catch { }
+})
 
 $script:Cfg = Read-Config
 $script:Window = $window
