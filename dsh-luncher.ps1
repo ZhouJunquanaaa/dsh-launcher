@@ -277,6 +277,15 @@ function Link-SharedDirectory ([string]$link, [string]$target, [string]$seedFrom
     }
 }
 
+function Seed-SettingsFile ([string]$homePath) {
+    # 实例 home 里没有 settings.yaml 时，用桌面端那份打底，否则模型/供应商配置是空的
+    $target = Join-Path $homePath 'settings.yaml'
+    if (Test-Path $target) { return }
+    $source = Join-Path (Join-Path $env:USERPROFILE '.dsh') 'settings.yaml'
+    if (-not (Test-Path $source)) { return }
+    Copy-Item $source $target -Force -ErrorAction SilentlyContinue
+}
+
 function Enable-WorkspaceSharing ([string]$homePath) {
     $desktopHome = Join-Path $env:USERPROFILE '.dsh'
     $shared = Join-Path $script:DataRoot 'shared-workspaces'
@@ -843,6 +852,7 @@ function Start-Instance ($inst) {
     }
 
     $homePath = Get-InstanceHome $inst
+    if ((Get-HomeMode $inst) -ne 'desktop') { Seed-SettingsFile $homePath }
     if ((Get-HomeMode $inst) -eq 'workspaces') {
         if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null }
         Enable-WorkspaceSharing $homePath
