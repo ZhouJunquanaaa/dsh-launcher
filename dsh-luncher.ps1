@@ -211,7 +211,15 @@ function Get-InstanceDir ([string]$name) {
     return (Join-Path $script:InstancesRoot $name)
 }
 
+function Get-SharedHome {
+    $path = Join-Path $script:DataRoot 'shared-home'
+    if (-not (Test-Path $path)) { New-Item -ItemType Directory -Path $path -Force | Out-Null }
+    return $path
+}
+
 function Get-InstanceHome ($inst) {
+    # shareHome：多个实例共用同一份配置（工作区、会话、凭证），只换 dsh 版本
+    if ($inst.shareHome) { return (Get-SharedHome) }
     if ($inst.dir) { return (Join-Path $inst.dir 'home') }
     return (Join-Path (Get-InstanceDir $inst.name) 'home')
 }
@@ -230,6 +238,7 @@ function Save-Instance ($inst) {
     }
     if ($inst.bin) { $payload.bin = $inst.bin }
     if ($inst.source) { $payload.source = $inst.source }
+    if ($inst.shareHome) { $payload.shareHome = $true }
     $payload | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'instance.json') -Encoding utf8
     return $dir
 }
@@ -444,6 +453,29 @@ function Start-AppUpdate {
     $script:Window.Close()
 }
 
+function Toggle-ShareHome ($inst) {
+    $newValue = -not $inst.shareHome
+    $target = if ($newValue) { Get-SharedHome } else { Join-Path (Get-InstanceDir $inst.name) 'home' }
+
+    $message = if ($newValue) {
+        '把「' + $inst.name + '」改成共享配置？' + [Environment]::NewLine + [Environment]::NewLine +
+        '之后它和其他共享实例使用同一份工作区、会话和凭证：' + [Environment]::NewLine + $target +
+        [Environment]::NewLine + [Environment]::NewLine +
+        '原来的独立配置目录会保留，不会删除。'
+    } else {
+        '把「' + $inst.name + '」改回独立配置？' + [Environment]::NewLine + [Environment]::NewLine +
+        '新的独立目录：' + [Environment]::NewLine + $target
+    }
+
+    $answer = [System.Windows.MessageBox]::Show($message, '共享配置', 'YesNo', 'Question')
+    if ($answer -ne 'Yes') { return }
+
+    $inst | Add-Member -NotePropertyName shareHome -NotePropertyValue $newValue -Force
+    Save-Instance $inst | Out-Null
+    Refresh-InstanceList
+    Append-Log ('实例 ' + $inst.name + ' 改为' + $(if ($newValue) { '共享' } else { '独立' }) + '配置' + [Environment]::NewLine)
+}
+
 function Get-NpmPath {
     foreach ($name in @('npm.cmd', 'npm.exe', 'npm')) {
         $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -623,6 +655,33 @@ function Start-Instance ($inst) {
     $errLog = $base + '.err.log'
     $node = Get-NodePath
     $port = [int]$inst.port
+
+    # 端口被占用：如果是上次没退干净的同一个版本，直接清掉；否则明确报错
+    if (-not (Test-PortFree $port)) {
+        $owner = $null
+        try {
+            $conn = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction Stop | Select-Object -First 1
+            if ($conn) {
+                $owner = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $conn.OwningProcess) -ErrorAction SilentlyContinue
+            }
+        } catch { }
+
+        $isOurs = $owner -and $owner.CommandLine -and $owner.CommandLine.Contains($inst.dshVersion)
+        if ($isOurs) {
+            try { taskkill /PID $owner.ProcessId /T /F 2>&1 | Out-Null } catch { }
+            Start-Sleep -Milliseconds 900
+        }
+
+        if (-not (Test-PortFree $port)) {
+            $detail = if ($owner) { 'PID ' + $owner.ProcessId + '  ' + $owner.Name } else { '未知进程' }
+            [System.Windows.MessageBox]::Show(
+                '端口 ' + $port + ' 已被占用（' + $detail + '）。' + [Environment]::NewLine + [Environment]::NewLine +
+                '请结束该进程，或用「新增实例」给这个版本换一个端口。',
+                '端口被占用') | Out-Null
+            return
+        }
+    }
+
     if ($sourceDir) {
         $argList = @('--import', 'tsx/esm', $entry, 'web', '--port', "$port", '--no-open')
         $workDir = $sourceDir
@@ -685,6 +744,7 @@ function Refresh-InstanceList {
             else { $status = '启动中' }
         }
         $label = if ($inst.source) { '源码 ' + $inst.dshVersion } else { $inst.dshVersion }
+        if ($inst.shareHome) { $label = $label + '（共享）' }
         $rows += [pscustomobject]@{
             Name    = $inst.name
             Version = $label
@@ -967,7 +1027,7 @@ function Show-AddDialog {
 
     $grid = [System.Windows.Controls.Grid]::new()
     $grid.Margin = [System.Windows.Thickness]::new(18)
-    foreach ($i in 0..4) {
+    foreach ($i in 0..5) {
         $rd = [System.Windows.Controls.RowDefinition]::new()
         $rd.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Auto)
         $grid.RowDefinitions.Add($rd)
@@ -1016,11 +1076,20 @@ function Show-AddDialog {
     [System.Windows.Controls.Grid]::SetRow($txtCwd, 3); [System.Windows.Controls.Grid]::SetColumn($txtCwd, 1)
     $grid.Children.Add($txtCwd) | Out-Null
 
+    $chkShare = [System.Windows.Controls.CheckBox]::new()
+    $chkShare.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
+    $chkShareText = [System.Windows.Controls.TextBlock]::new()
+    $chkShareText.Text = '与其他实例共享配置（工作区、会话、凭证）'
+    $chkShareText.TextWrapping = 'Wrap'
+    $chkShare.Content = $chkShareText
+    [System.Windows.Controls.Grid]::SetRow($chkShare, 4); [System.Windows.Controls.Grid]::SetColumn($chkShare, 1)
+    $grid.Children.Add($chkShare) | Out-Null
+
     $panel = [System.Windows.Controls.StackPanel]::new()
     $panel.Orientation = 'Horizontal'
     $panel.HorizontalAlignment = 'Right'
     $panel.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
-    [System.Windows.Controls.Grid]::SetRow($panel, 4)
+    [System.Windows.Controls.Grid]::SetRow($panel, 5)
     [System.Windows.Controls.Grid]::SetColumn($panel, 1)
 
     $btnOk = [System.Windows.Controls.Button]::new()
@@ -1053,10 +1122,11 @@ function Show-AddDialog {
             [System.Windows.MessageBox]::Show('端口无效。', '提示') | Out-Null; return
         }
         $script:DlgResult = [pscustomobject]@{
-            Name    = $name
-            Version = [string]$script:DlgVer.SelectedItem
-            Port    = $port
-            Cwd     = $script:DlgCwd.Text.Trim()
+            Name      = $name
+            Version   = [string]$script:DlgVer.SelectedItem
+            Port      = $port
+            Cwd       = $script:DlgCwd.Text.Trim()
+            ShareHome = [bool]$script:DlgShare.IsChecked
         }
         $script:DlgWindow.Close()
     })
@@ -1066,6 +1136,7 @@ function Show-AddDialog {
     $script:DlgVer = $cmbVer
     $script:DlgPort = $txtPort
     $script:DlgCwd = $txtCwd
+    $script:DlgShare = $chkShare
 
     $dlg.ShowDialog() | Out-Null
     return $script:DlgResult
@@ -1304,6 +1375,7 @@ $window.FindName('btnAdd').Add_Click({
         port       = $result.Port
         cwd        = $result.Cwd
         notes      = ''
+        shareHome  = $result.ShareHome
     })
     $homePath = Join-Path $created 'home'
     if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null; Seed-Home $homePath }
@@ -1324,6 +1396,27 @@ $window.FindName('btnRemove').Add_Click({
 })
 
 $window.FindName('btnImport').Add_Click({ Import-Local })
+
+$window.FindName('menuToggleShare').Add_Click({
+    try {
+        $inst = Get-SelectedInstance
+        if (-not $inst) { return }
+        Toggle-ShareHome $inst
+    } catch {
+        Show-Error 'menuToggleShare' $_
+    }
+})
+
+$window.FindName('menuOpenFolder').Add_Click({
+    try {
+        $inst = Get-SelectedInstance
+        if (-not $inst) { return }
+        $dir = if ($inst.dir) { $inst.dir } else { Get-InstanceDir $inst.name }
+        if (Test-Path $dir) { Start-Process explorer.exe $dir }
+    } catch {
+        Show-Error 'menuOpenFolder' $_
+    }
+})
 
 $window.FindName('cmbRegistry').Add_SelectionChanged({
     try {
