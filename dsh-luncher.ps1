@@ -224,13 +224,63 @@ function Get-HomeMode ($inst) {
 }
 
 function Get-InstanceHome ($inst) {
-    # own：实例自己的 home；shared：所有共享实例共用；desktop：直接用桌面端的 ~/.dsh
+    # own / workspaces：实例自己的 home（workspaces 只把 storages 指到共享目录）
+    # shared：整份 home 共用；desktop：直接用桌面端的 ~/.dsh
     switch (Get-HomeMode $inst) {
         'desktop' { return (Join-Path $env:USERPROFILE '.dsh') }
         'shared'  { return (Get-SharedHome) }
     }
     if ($inst.dir) { return (Join-Path $inst.dir 'home') }
     return (Join-Path (Get-InstanceDir $inst.name) 'home')
+}
+
+function Merge-WorkspaceFile ([string]$source, [string]$target) {
+    if (-not (Test-Path $source)) { return }
+    if (-not (Test-Path $target)) { Copy-Item $source $target -Force; return }
+    try {
+        $base = Get-Content $target -Raw -Encoding utf8 | ConvertFrom-Json
+        $extra = Get-Content $source -Raw -Encoding utf8 | ConvertFrom-Json
+        foreach ($prop in $extra.tables.workspaces.PSObject.Properties) {
+            if ($base.tables.workspaces.PSObject.Properties[$prop.Name]) { continue }
+            $base.tables.workspaces | Add-Member -NotePropertyName $prop.Name -NotePropertyValue $prop.Value -Force
+            if ($base.global.workspaceIds -notcontains $prop.Name) {
+                $base.global.workspaceIds = @($base.global.workspaceIds) + $prop.Name
+            }
+        }
+        $base | ConvertTo-Json -Depth 20 | Set-Content $target -Encoding utf8
+    } catch {
+        Copy-Item $source $target -Force
+    }
+}
+
+function Enable-WorkspaceSharing ([string]$homePath) {
+    $shared = Join-Path $script:DataRoot 'shared-workspaces'
+    if (-not (Test-Path $shared)) { New-Item -ItemType Directory -Path $shared -Force | Out-Null }
+
+    # 第一次启用时，用桌面端的工作区列表打底，这样实例一打开就能看到桌面端的项目
+    $sharedWorkspace = Join-Path $shared 'workspace.json'
+    if (-not (Test-Path $sharedWorkspace)) {
+        $desktopWorkspace = Join-Path (Join-Path $env:USERPROFILE '.dsh') 'storages\workspace.json'
+        if (Test-Path $desktopWorkspace) { Copy-Item $desktopWorkspace $sharedWorkspace -Force -ErrorAction SilentlyContinue }
+    }
+
+    $link = Join-Path $homePath 'storages'
+    if (Test-Path $link) {
+        $item = Get-Item $link -Force -ErrorAction SilentlyContinue
+        if ($item -and $item.LinkType) { return }
+        # 已经有真实目录：先把工作区并进共享目录，再换成 junction
+        $oldWorkspace = Join-Path $link 'workspace.json'
+        if (Test-Path $oldWorkspace) { Merge-WorkspaceFile $oldWorkspace (Join-Path $shared 'workspace.json') }
+        Get-ChildItem $link -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'workspace.json' } | ForEach-Object {
+            $dest = Join-Path $shared $_.Name
+            if (-not (Test-Path $dest)) { Copy-Item $_.FullName $dest -Recurse -Force -ErrorAction SilentlyContinue }
+        }
+        Remove-Item $link -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    if (-not (Test-Path $link)) {
+        New-Item -ItemType Junction -Path $link -Target $shared -ErrorAction SilentlyContinue | Out-Null
+    }
 }
 
 function Save-Instance ($inst) {
@@ -467,17 +517,21 @@ function Set-InstanceHomeMode ($inst, [string]$mode) {
     if ((Get-HomeMode $inst) -eq $mode) { return }
 
     $target = switch ($mode) {
-        'desktop' { Join-Path $env:USERPROFILE '.dsh' }
-        'shared'  { Join-Path $script:DataRoot 'shared-home' }
-        default   { Join-Path (Get-InstanceDir $inst.name) 'home' }
+        'desktop'    { Join-Path $env:USERPROFILE '.dsh' }
+        'shared'     { Join-Path $script:DataRoot 'shared-home' }
+        'workspaces' { Join-Path (Get-InstanceDir $inst.name) 'home' }
+        default      { Join-Path (Get-InstanceDir $inst.name) 'home' }
     }
 
-    $message = '把「' + $inst.name + '」的配置来源改成 ' + $(switch ($mode) {
-        'desktop' { '桌面端（~/.dsh）' }
-        'shared'  { '共享配置' }
-        default   { '独立配置' }
-    }) + '？' + [Environment]::NewLine + [Environment]::NewLine +
-    '之后它的 DSH_HOME 指向：' + [Environment]::NewLine + $target +
+    $label = switch ($mode) {
+        'desktop'    { '桌面端（~/.dsh）' }
+        'shared'     { '共享配置' }
+        'workspaces' { '共享工作区（storages 指到共享目录，其余配置独立）' }
+        default      { '独立配置' }
+    }
+
+    $message = '把「' + $inst.name + '」的配置来源改成 ' + $label + '？' + [Environment]::NewLine + [Environment]::NewLine +
+    'DSH_HOME：' + [Environment]::NewLine + $target +
     [Environment]::NewLine + [Environment]::NewLine +
     '原来的目录会保留，不会删除。'
 
@@ -487,6 +541,12 @@ function Set-InstanceHomeMode ($inst, [string]$mode) {
     $inst | Add-Member -NotePropertyName homeMode -NotePropertyValue $mode -Force
     $inst | Add-Member -NotePropertyName shareHome -NotePropertyValue $false -Force
     Save-Instance $inst | Out-Null
+
+    if ($mode -eq 'workspaces') {
+        $homePath = Get-InstanceHome $inst
+        if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null }
+        Enable-WorkspaceSharing $homePath
+    }
     Refresh-InstanceList
     Append-Log ('实例 ' + $inst.name + ' 配置来源改为 ' + $mode + [Environment]::NewLine)
 }
@@ -750,6 +810,10 @@ function Start-Instance ($inst) {
     }
 
     $homePath = Get-InstanceHome $inst
+    if ((Get-HomeMode $inst) -eq 'workspaces') {
+        if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null }
+        Enable-WorkspaceSharing $homePath
+    }
 
     # 同一份 home 被两个进程同时写会互相抢存储，先提醒
     $conflicts = @()
@@ -868,8 +932,9 @@ function Refresh-InstanceList {
         }
         $label = if ($inst.source) { '源码 ' + $inst.dshVersion } else { $inst.dshVersion }
         switch (Get-HomeMode $inst) {
-            'shared'  { $label = $label + '（共享）' }
-            'desktop' { $label = $label + '（桌面端）' }
+            'shared'     { $label = $label + '（共享）' }
+            'workspaces' { $label = $label + '（共享工作区）' }
+            'desktop'    { $label = $label + '（桌面端）' }
         }
         $rows += [pscustomobject]@{
             Name    = $inst.name
@@ -1210,14 +1275,14 @@ function Show-AddDialog {
     $grid.Children.Add($modeLabel) | Out-Null
 
     $cmbMode = [System.Windows.Controls.ComboBox]::new()
-    $cmbMode.ItemsSource = @('独立配置', '共享配置', '桌面端配置')
+    $cmbMode.ItemsSource = @('独立配置', '共享工作区', '桌面端配置')
     $cmbMode.SelectedIndex = 0
     $cmbMode.Margin = [System.Windows.Thickness]::new(0, 6, 0, 6)
     [System.Windows.Controls.Grid]::SetRow($cmbMode, 4); [System.Windows.Controls.Grid]::SetColumn($cmbMode, 1)
     $grid.Children.Add($cmbMode) | Out-Null
 
     $modeHint = [System.Windows.Controls.TextBlock]::new()
-    $modeHint.Text = '独立：自己一份；共享：多个实例共用；桌面端：直接用 ~/.dsh，和桌面端共享工作区'
+    $modeHint.Text = '独立：全部自己一份；共享工作区：只共用工作区列表，配置各自独立；桌面端：整份配置都用 ~/.dsh'
     $modeHint.TextWrapping = 'Wrap'
     $modeHint.FontSize = 11
     $modeHint.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'MutedBrush')
@@ -1266,7 +1331,7 @@ function Show-AddDialog {
             Version   = [string]$script:DlgVer.SelectedItem
             Port      = $port
             Cwd      = $script:DlgCwd.Text.Trim()
-            HomeMode = @('own', 'shared', 'desktop')[[Math]::Max(0, $script:DlgMode.SelectedIndex)]
+            HomeMode = @('own', 'workspaces', 'desktop')[[Math]::Max(0, $script:DlgMode.SelectedIndex)]
         }
         $script:DlgWindow.Close()
     })
@@ -1562,7 +1627,7 @@ $window.FindName('menuEditPort').Add_Click({
 
 foreach ($pair in @(
     @{ Name = 'menuModeOwn'; Mode = 'own' },
-    @{ Name = 'menuModeShared'; Mode = 'shared' },
+    @{ Name = 'menuModeWorkspaces'; Mode = 'workspaces' },
     @{ Name = 'menuModeDesktop'; Mode = 'desktop' }
 )) {
     $item = $window.FindName($pair.Name)

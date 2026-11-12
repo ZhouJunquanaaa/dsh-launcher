@@ -222,7 +222,7 @@
                 <MenuItem x:Name="menuEditPort" Header="修改端口…"/>
                 <MenuItem Header="配置来源">
                   <MenuItem x:Name="menuModeOwn" Header="独立配置"/>
-                  <MenuItem x:Name="menuModeShared" Header="共享配置"/>
+                  <MenuItem x:Name="menuModeWorkspaces" Header="共享工作区（配置各自独立）"/>
                   <MenuItem x:Name="menuModeDesktop" Header="桌面端配置（与桌面端共享工作区）"/>
                 </MenuItem>
                 <MenuItem x:Name="menuOpenFolder" Header="打开实例目录"/>
