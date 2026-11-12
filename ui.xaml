@@ -211,6 +211,7 @@
             <Button x:Name="btnOpen" Content="打开网页"/>
             <Button x:Name="btnAdd" Content="新增实例"/>
             <Button x:Name="btnAddSource" Content="添加源码"/>
+            <Button x:Name="btnEditPort" Content="改端口"/>
             <Button x:Name="btnRemove" Content="删除"/>
             <Button x:Name="btnImport" Content="导入本机" Margin="0"/>
           </StackPanel>
@@ -218,6 +219,7 @@
           <ListView Grid.Row="1" x:Name="lstInstances" SelectionMode="Single">
             <ListView.ContextMenu>
               <ContextMenu>
+                <MenuItem x:Name="menuEditPort" Header="修改端口…"/>
                 <MenuItem x:Name="menuToggleShare" Header="切换共享配置"/>
                 <MenuItem x:Name="menuOpenFolder" Header="打开实例目录"/>
               </ContextMenu>

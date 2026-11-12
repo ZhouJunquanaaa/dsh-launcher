@@ -1,7 +1,7 @@
 ; dsh-luncher 安装脚本（Inno Setup 6）
 ; 编译：ISCC.exe installer\dsh-luncher.iss
 
-#define AppVersion "2.1.0"
+#define AppVersion "2.2.0"
 #define AppName "dsh-luncher"
 #define AppPublisher "ZhouJunquanaaa"
 #define AppUrl "https://github.com/ZhouJunquanaaa/dsh-launcher"

@@ -476,6 +476,97 @@ function Toggle-ShareHome ($inst) {
     Append-Log ('实例 ' + $inst.name + ' 改为' + $(if ($newValue) { '共享' } else { '独立' }) + '配置' + [Environment]::NewLine)
 }
 
+function Show-InputDialog ([string]$title, [string]$label, [string]$default) {
+    $dlg = [System.Windows.Window]::new()
+    $dlg.Title = $title
+    $dlg.Width = 420
+    $dlg.SizeToContent = 'Height'
+    $dlg.WindowStartupLocation = 'CenterOwner'
+    $dlg.ResizeMode = 'NoResize'
+    $dlg.Resources.MergedDictionaries.Add((New-ThemeDictionary $script:Theme))
+    $dlg.SetResourceReference([System.Windows.Window]::BackgroundProperty, 'WindowBrush')
+    $dlg.SetResourceReference([System.Windows.Window]::ForegroundProperty, 'TextBrush')
+    $dlg.FontFamily = [System.Windows.Media.FontFamily]::new('Microsoft YaHei UI')
+
+    $panel = [System.Windows.Controls.StackPanel]::new()
+    $panel.Margin = [System.Windows.Thickness]::new(18)
+
+    $text = [System.Windows.Controls.TextBlock]::new()
+    $text.Text = $label
+    $text.TextWrapping = 'Wrap'
+    $text.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+    $panel.Children.Add($text) | Out-Null
+
+    $box = [System.Windows.Controls.TextBox]::new()
+    $box.Text = $default
+    $panel.Children.Add($box) | Out-Null
+
+    $buttons = [System.Windows.Controls.StackPanel]::new()
+    $buttons.Orientation = 'Horizontal'
+    $buttons.HorizontalAlignment = 'Right'
+    $buttons.Margin = [System.Windows.Thickness]::new(0, 14, 0, 0)
+
+    $ok = [System.Windows.Controls.Button]::new()
+    $ok.Content = '确定'
+    $ok.Width = 90
+    $ok.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $ok.IsDefault = $true
+    $ok.Style = $script:Window.FindResource('PrimaryButton')
+    $cancel = [System.Windows.Controls.Button]::new()
+    $cancel.Content = '取消'
+    $cancel.Width = 90
+    $cancel.IsCancel = $true
+    $cancel.Style = $script:Window.FindResource('SecondaryButton')
+
+    $buttons.Children.Add($ok) | Out-Null
+    $buttons.Children.Add($cancel) | Out-Null
+    $panel.Children.Add($buttons) | Out-Null
+
+    $dlg.Content = $panel
+    $script:InputResult = $null
+    $script:InputBox = $box
+    $script:InputWindow = $dlg
+
+    $ok.Add_Click({
+        $script:InputResult = $script:InputBox.Text.Trim()
+        $script:InputWindow.Close()
+    })
+
+    $dlg.ShowDialog() | Out-Null
+    return $script:InputResult
+}
+
+function Edit-InstancePort ($inst) {
+    $current = [string]$inst.port
+    $entered = Show-InputDialog ('修改端口 - ' + $inst.name) '给这个实例换一个监听端口（1-65535）：' $current
+    if (-not $entered) { return }
+
+    $port = 0
+    if (-not [int]::TryParse($entered, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+        [System.Windows.MessageBox]::Show('端口无效，请输入 1-65535 之间的数字。', '修改端口') | Out-Null
+        return
+    }
+
+    if ($port -ne [int]$inst.port) {
+        $others = @(Get-Instances | Where-Object { $_.name -ne $inst.name -and [int]$_.port -eq $port })
+        if ($others.Count -gt 0) {
+            [System.Windows.MessageBox]::Show('端口 ' + $port + ' 已被实例「' + $others[0].name + '」占用。', '修改端口') | Out-Null
+            return
+        }
+        if (-not (Test-PortFree $port)) {
+            $answer = [System.Windows.MessageBox]::Show(
+                '端口 ' + $port + ' 现在被别的进程占用着。' + [Environment]::NewLine + [Environment]::NewLine + '仍然保存这个端口吗？',
+                '修改端口', 'YesNo', 'Warning')
+            if ($answer -ne 'Yes') { return }
+        }
+    }
+
+    $inst | Add-Member -NotePropertyName port -NotePropertyValue $port -Force
+    Save-Instance $inst | Out-Null
+    Refresh-InstanceList
+    Append-Log ('实例 ' + $inst.name + ' 端口改为 ' + $port + [Environment]::NewLine)
+}
+
 function Get-NpmPath {
     foreach ($name in @('npm.cmd', 'npm.exe', 'npm')) {
         $cmd = Get-Command $name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -644,6 +735,23 @@ function Start-Instance ($inst) {
     }
 
     $homePath = Get-InstanceHome $inst
+
+    # 同一份 home 被两个进程同时写会互相抢存储，先提醒
+    $conflicts = @()
+    foreach ($runningName in @($script:Running.Keys)) {
+        $other = Get-Instances | Where-Object { $_.name -eq $runningName } | Select-Object -First 1
+        if ($other -and (Get-InstanceHome $other) -eq $homePath) { $conflicts += $runningName }
+    }
+    if ($conflicts.Count -gt 0) {
+        $answer = [System.Windows.MessageBox]::Show(
+            '实例「' + ($conflicts -join '、') + '」正在使用同一份配置目录：' + [Environment]::NewLine + $homePath +
+            [Environment]::NewLine + [Environment]::NewLine +
+            '两个 dsh 进程同时写同一份存储可能互相覆盖，出现「无法保存」之类的错误。' +
+            [Environment]::NewLine + [Environment]::NewLine + '仍然启动吗？',
+            '共享配置冲突', 'YesNo', 'Warning')
+        if ($answer -ne 'Yes') { return }
+    }
+
     if (-not (Test-Path $homePath)) {
         New-Item -ItemType Directory -Path $homePath -Force | Out-Null
         Seed-Home $homePath
@@ -1396,6 +1504,29 @@ $window.FindName('btnRemove').Add_Click({
 })
 
 $window.FindName('btnImport').Add_Click({ Import-Local })
+
+$window.FindName('btnEditPort').Add_Click({
+    try {
+        $inst = Get-SelectedInstance
+        if (-not $inst) {
+            [System.Windows.MessageBox]::Show('请先选中一个实例。', '提示') | Out-Null
+            return
+        }
+        Edit-InstancePort $inst
+    } catch {
+        Show-Error 'btnEditPort' $_
+    }
+})
+
+$window.FindName('menuEditPort').Add_Click({
+    try {
+        $inst = Get-SelectedInstance
+        if (-not $inst) { return }
+        Edit-InstancePort $inst
+    } catch {
+        Show-Error 'menuEditPort' $_
+    }
+})
 
 $window.FindName('menuToggleShare').Add_Click({
     try {
