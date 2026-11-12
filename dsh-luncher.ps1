@@ -217,9 +217,18 @@ function Get-SharedHome {
     return $path
 }
 
+function Get-HomeMode ($inst) {
+    if ($inst.homeMode) { return $inst.homeMode }
+    if ($inst.shareHome) { return 'shared' }
+    return 'own'
+}
+
 function Get-InstanceHome ($inst) {
-    # shareHome：多个实例共用同一份配置（工作区、会话、凭证），只换 dsh 版本
-    if ($inst.shareHome) { return (Get-SharedHome) }
+    # own：实例自己的 home；shared：所有共享实例共用；desktop：直接用桌面端的 ~/.dsh
+    switch (Get-HomeMode $inst) {
+        'desktop' { return (Join-Path $env:USERPROFILE '.dsh') }
+        'shared'  { return (Get-SharedHome) }
+    }
     if ($inst.dir) { return (Join-Path $inst.dir 'home') }
     return (Join-Path (Get-InstanceDir $inst.name) 'home')
 }
@@ -238,7 +247,8 @@ function Save-Instance ($inst) {
     }
     if ($inst.bin) { $payload.bin = $inst.bin }
     if ($inst.source) { $payload.source = $inst.source }
-    if ($inst.shareHome) { $payload.shareHome = $true }
+    $mode = Get-HomeMode $inst
+    if ($mode -ne 'own') { $payload.homeMode = $mode }
     $payload | ConvertTo-Json -Depth 5 | Set-Content (Join-Path $dir 'instance.json') -Encoding utf8
     return $dir
 }
@@ -453,27 +463,32 @@ function Start-AppUpdate {
     $script:Window.Close()
 }
 
-function Toggle-ShareHome ($inst) {
-    $newValue = -not $inst.shareHome
-    $target = if ($newValue) { Get-SharedHome } else { Join-Path (Get-InstanceDir $inst.name) 'home' }
+function Set-InstanceHomeMode ($inst, [string]$mode) {
+    if ((Get-HomeMode $inst) -eq $mode) { return }
 
-    $message = if ($newValue) {
-        '把「' + $inst.name + '」改成共享配置？' + [Environment]::NewLine + [Environment]::NewLine +
-        '之后它和其他共享实例使用同一份工作区、会话和凭证：' + [Environment]::NewLine + $target +
-        [Environment]::NewLine + [Environment]::NewLine +
-        '原来的独立配置目录会保留，不会删除。'
-    } else {
-        '把「' + $inst.name + '」改回独立配置？' + [Environment]::NewLine + [Environment]::NewLine +
-        '新的独立目录：' + [Environment]::NewLine + $target
+    $target = switch ($mode) {
+        'desktop' { Join-Path $env:USERPROFILE '.dsh' }
+        'shared'  { Join-Path $script:DataRoot 'shared-home' }
+        default   { Join-Path (Get-InstanceDir $inst.name) 'home' }
     }
 
-    $answer = [System.Windows.MessageBox]::Show($message, '共享配置', 'YesNo', 'Question')
+    $message = '把「' + $inst.name + '」的配置来源改成 ' + $(switch ($mode) {
+        'desktop' { '桌面端（~/.dsh）' }
+        'shared'  { '共享配置' }
+        default   { '独立配置' }
+    }) + '？' + [Environment]::NewLine + [Environment]::NewLine +
+    '之后它的 DSH_HOME 指向：' + [Environment]::NewLine + $target +
+    [Environment]::NewLine + [Environment]::NewLine +
+    '原来的目录会保留，不会删除。'
+
+    $answer = [System.Windows.MessageBox]::Show($message, '配置来源', 'YesNo', 'Question')
     if ($answer -ne 'Yes') { return }
 
-    $inst | Add-Member -NotePropertyName shareHome -NotePropertyValue $newValue -Force
+    $inst | Add-Member -NotePropertyName homeMode -NotePropertyValue $mode -Force
+    $inst | Add-Member -NotePropertyName shareHome -NotePropertyValue $false -Force
     Save-Instance $inst | Out-Null
     Refresh-InstanceList
-    Append-Log ('实例 ' + $inst.name + ' 改为' + $(if ($newValue) { '共享' } else { '独立' }) + '配置' + [Environment]::NewLine)
+    Append-Log ('实例 ' + $inst.name + ' 配置来源改为 ' + $mode + [Environment]::NewLine)
 }
 
 function Show-InputDialog ([string]$title, [string]$label, [string]$default) {
@@ -852,7 +867,10 @@ function Refresh-InstanceList {
             else { $status = '启动中' }
         }
         $label = if ($inst.source) { '源码 ' + $inst.dshVersion } else { $inst.dshVersion }
-        if ($inst.shareHome) { $label = $label + '（共享）' }
+        switch (Get-HomeMode $inst) {
+            'shared'  { $label = $label + '（共享）' }
+            'desktop' { $label = $label + '（桌面端）' }
+        }
         $rows += [pscustomobject]@{
             Name    = $inst.name
             Version = $label
@@ -1135,7 +1153,7 @@ function Show-AddDialog {
 
     $grid = [System.Windows.Controls.Grid]::new()
     $grid.Margin = [System.Windows.Thickness]::new(18)
-    foreach ($i in 0..5) {
+    foreach ($i in 0..6) {
         $rd = [System.Windows.Controls.RowDefinition]::new()
         $rd.Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Auto)
         $grid.RowDefinitions.Add($rd)
@@ -1184,20 +1202,34 @@ function Show-AddDialog {
     [System.Windows.Controls.Grid]::SetRow($txtCwd, 3); [System.Windows.Controls.Grid]::SetColumn($txtCwd, 1)
     $grid.Children.Add($txtCwd) | Out-Null
 
-    $chkShare = [System.Windows.Controls.CheckBox]::new()
-    $chkShare.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
-    $chkShareText = [System.Windows.Controls.TextBlock]::new()
-    $chkShareText.Text = '与其他实例共享配置（工作区、会话、凭证）'
-    $chkShareText.TextWrapping = 'Wrap'
-    $chkShare.Content = $chkShareText
-    [System.Windows.Controls.Grid]::SetRow($chkShare, 4); [System.Windows.Controls.Grid]::SetColumn($chkShare, 1)
-    $grid.Children.Add($chkShare) | Out-Null
+    $modeLabel = [System.Windows.Controls.TextBlock]::new()
+    $modeLabel.Text = '配置来源'
+    $modeLabel.VerticalAlignment = 'Center'
+    $modeLabel.Margin = [System.Windows.Thickness]::new(0, 6, 8, 6)
+    [System.Windows.Controls.Grid]::SetRow($modeLabel, 4); [System.Windows.Controls.Grid]::SetColumn($modeLabel, 0)
+    $grid.Children.Add($modeLabel) | Out-Null
+
+    $cmbMode = [System.Windows.Controls.ComboBox]::new()
+    $cmbMode.ItemsSource = @('独立配置', '共享配置', '桌面端配置')
+    $cmbMode.SelectedIndex = 0
+    $cmbMode.Margin = [System.Windows.Thickness]::new(0, 6, 0, 6)
+    [System.Windows.Controls.Grid]::SetRow($cmbMode, 4); [System.Windows.Controls.Grid]::SetColumn($cmbMode, 1)
+    $grid.Children.Add($cmbMode) | Out-Null
+
+    $modeHint = [System.Windows.Controls.TextBlock]::new()
+    $modeHint.Text = '独立：自己一份；共享：多个实例共用；桌面端：直接用 ~/.dsh，和桌面端共享工作区'
+    $modeHint.TextWrapping = 'Wrap'
+    $modeHint.FontSize = 11
+    $modeHint.SetResourceReference([System.Windows.Controls.TextBlock]::ForegroundProperty, 'MutedBrush')
+    $modeHint.Margin = [System.Windows.Thickness]::new(0, 0, 0, 4)
+    [System.Windows.Controls.Grid]::SetRow($modeHint, 5); [System.Windows.Controls.Grid]::SetColumn($modeHint, 1)
+    $grid.Children.Add($modeHint) | Out-Null
 
     $panel = [System.Windows.Controls.StackPanel]::new()
     $panel.Orientation = 'Horizontal'
     $panel.HorizontalAlignment = 'Right'
     $panel.Margin = [System.Windows.Thickness]::new(0, 10, 0, 0)
-    [System.Windows.Controls.Grid]::SetRow($panel, 5)
+    [System.Windows.Controls.Grid]::SetRow($panel, 6)
     [System.Windows.Controls.Grid]::SetColumn($panel, 1)
 
     $btnOk = [System.Windows.Controls.Button]::new()
@@ -1233,8 +1265,8 @@ function Show-AddDialog {
             Name      = $name
             Version   = [string]$script:DlgVer.SelectedItem
             Port      = $port
-            Cwd       = $script:DlgCwd.Text.Trim()
-            ShareHome = [bool]$script:DlgShare.IsChecked
+            Cwd      = $script:DlgCwd.Text.Trim()
+            HomeMode = @('own', 'shared', 'desktop')[[Math]::Max(0, $script:DlgMode.SelectedIndex)]
         }
         $script:DlgWindow.Close()
     })
@@ -1244,7 +1276,7 @@ function Show-AddDialog {
     $script:DlgVer = $cmbVer
     $script:DlgPort = $txtPort
     $script:DlgCwd = $txtCwd
-    $script:DlgShare = $chkShare
+    $script:DlgMode = $cmbMode
 
     $dlg.ShowDialog() | Out-Null
     return $script:DlgResult
@@ -1483,7 +1515,7 @@ $window.FindName('btnAdd').Add_Click({
         port       = $result.Port
         cwd        = $result.Cwd
         notes      = ''
-        shareHome  = $result.ShareHome
+        homeMode   = $result.HomeMode
     })
     $homePath = Join-Path $created 'home'
     if (-not (Test-Path $homePath)) { New-Item -ItemType Directory -Path $homePath -Force | Out-Null; Seed-Home $homePath }
@@ -1528,15 +1560,23 @@ $window.FindName('menuEditPort').Add_Click({
     }
 })
 
-$window.FindName('menuToggleShare').Add_Click({
-    try {
-        $inst = Get-SelectedInstance
-        if (-not $inst) { return }
-        Toggle-ShareHome $inst
-    } catch {
-        Show-Error 'menuToggleShare' $_
-    }
-})
+foreach ($pair in @(
+    @{ Name = 'menuModeOwn'; Mode = 'own' },
+    @{ Name = 'menuModeShared'; Mode = 'shared' },
+    @{ Name = 'menuModeDesktop'; Mode = 'desktop' }
+)) {
+    $item = $window.FindName($pair.Name)
+    $mode = $pair.Mode
+    $item.Add_Click({
+        try {
+            $inst = Get-SelectedInstance
+            if (-not $inst) { return }
+            Set-InstanceHomeMode $inst $mode
+        } catch {
+            Show-Error 'menuMode' $_
+        }
+    }.GetNewClosure())
+}
 
 $window.FindName('menuOpenFolder').Add_Click({
     try {

@@ -220,7 +220,11 @@
             <ListView.ContextMenu>
               <ContextMenu>
                 <MenuItem x:Name="menuEditPort" Header="修改端口…"/>
-                <MenuItem x:Name="menuToggleShare" Header="切换共享配置"/>
+                <MenuItem Header="配置来源">
+                  <MenuItem x:Name="menuModeOwn" Header="独立配置"/>
+                  <MenuItem x:Name="menuModeShared" Header="共享配置"/>
+                  <MenuItem x:Name="menuModeDesktop" Header="桌面端配置（与桌面端共享工作区）"/>
+                </MenuItem>
                 <MenuItem x:Name="menuOpenFolder" Header="打开实例目录"/>
               </ContextMenu>
             </ListView.ContextMenu>
