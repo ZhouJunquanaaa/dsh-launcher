@@ -253,34 +253,67 @@ function Merge-WorkspaceFile ([string]$source, [string]$target) {
     }
 }
 
-function Enable-WorkspaceSharing ([string]$homePath) {
-    $shared = Join-Path $script:DataRoot 'shared-workspaces'
-    if (-not (Test-Path $shared)) { New-Item -ItemType Directory -Path $shared -Force | Out-Null }
-
-    # 第一次启用时，用桌面端的工作区列表打底，这样实例一打开就能看到桌面端的项目
-    $sharedWorkspace = Join-Path $shared 'workspace.json'
-    if (-not (Test-Path $sharedWorkspace)) {
-        $desktopWorkspace = Join-Path (Join-Path $env:USERPROFILE '.dsh') 'storages\workspace.json'
-        if (Test-Path $desktopWorkspace) { Copy-Item $desktopWorkspace $sharedWorkspace -Force -ErrorAction SilentlyContinue }
+function Link-SharedDirectory ([string]$link, [string]$target, [string]$seedFrom) {
+    if (-not (Test-Path $target)) { New-Item -ItemType Directory -Path $target -Force | Out-Null }
+    if ((Test-Path $target) -and $seedFrom -and (Test-Path $seedFrom) -and
+        (@(Get-ChildItem $target -Force -ErrorAction SilentlyContinue).Count -eq 0)) {
+        Get-ChildItem $seedFrom -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            Copy-Item $_.FullName (Join-Path $target $_.Name) -Recurse -Force -ErrorAction SilentlyContinue
+        }
     }
 
-    $link = Join-Path $homePath 'storages'
     if (Test-Path $link) {
         $item = Get-Item $link -Force -ErrorAction SilentlyContinue
         if ($item -and $item.LinkType) { return }
-        # 已经有真实目录：先把工作区并进共享目录，再换成 junction
-        $oldWorkspace = Join-Path $link 'workspace.json'
-        if (Test-Path $oldWorkspace) { Merge-WorkspaceFile $oldWorkspace (Join-Path $shared 'workspace.json') }
-        Get-ChildItem $link -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'workspace.json' } | ForEach-Object {
-            $dest = Join-Path $shared $_.Name
+        Get-ChildItem $link -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            $dest = Join-Path $target $_.Name
             if (-not (Test-Path $dest)) { Copy-Item $_.FullName $dest -Recurse -Force -ErrorAction SilentlyContinue }
         }
         Remove-Item $link -Recurse -Force -ErrorAction SilentlyContinue
     }
 
     if (-not (Test-Path $link)) {
-        New-Item -ItemType Junction -Path $link -Target $shared -ErrorAction SilentlyContinue | Out-Null
+        New-Item -ItemType Junction -Path $link -Target $target -ErrorAction SilentlyContinue | Out-Null
     }
+}
+
+function Enable-WorkspaceSharing ([string]$homePath) {
+    $desktopHome = Join-Path $env:USERPROFILE '.dsh'
+    $shared = Join-Path $script:DataRoot 'shared-workspaces'
+    if (-not (Test-Path $shared)) { New-Item -ItemType Directory -Path $shared -Force | Out-Null }
+
+    # 第一次启用时，用桌面端的工作区列表打底，这样实例一打开就能看到桌面端的项目
+    $sharedWorkspace = Join-Path $shared 'workspace.json'
+    if (-not (Test-Path $sharedWorkspace)) {
+        $desktopWorkspace = Join-Path $desktopHome 'storages\workspace.json'
+        if (Test-Path $desktopWorkspace) { Copy-Item $desktopWorkspace $sharedWorkspace -Force -ErrorAction SilentlyContinue }
+    }
+
+    $link = Join-Path $homePath 'storages'
+    $alreadyLinked = $false
+    if (Test-Path $link) {
+        $item = Get-Item $link -Force -ErrorAction SilentlyContinue
+        if ($item -and $item.LinkType) { $alreadyLinked = $true }
+    }
+
+    if (-not $alreadyLinked) {
+        if (Test-Path $link) {
+            # 已经有真实目录：先把工作区并进共享目录，再换成 junction
+            $oldWorkspace = Join-Path $link 'workspace.json'
+            if (Test-Path $oldWorkspace) { Merge-WorkspaceFile $oldWorkspace (Join-Path $shared 'workspace.json') }
+            Get-ChildItem $link -Force -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne 'workspace.json' } | ForEach-Object {
+                $dest = Join-Path $shared $_.Name
+                if (-not (Test-Path $dest)) { Copy-Item $_.FullName $dest -Recurse -Force -ErrorAction SilentlyContinue }
+            }
+            Remove-Item $link -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        if (-not (Test-Path $link)) {
+            New-Item -ItemType Junction -Path $link -Target $shared -ErrorAction SilentlyContinue | Out-Null
+        }
+    }
+
+    # 会话也共享，否则工作区里只有空壳、聊天记录看不到
+    Link-SharedDirectory (Join-Path $homePath 'sessions') (Join-Path $script:DataRoot 'shared-sessions') (Join-Path $desktopHome 'sessions')
 }
 
 function Save-Instance ($inst) {
